@@ -1,5 +1,8 @@
-#analysis code by J. Langley and figure code by S. Jago
-
+########################################
+# Ethiopia PA Species Representativeness Analysis
+# Authors: Joe Langley, Sophie Jago (figures)
+# Description: Assess representativeness of Ethiopia's protected area network across taxa
+########################################
 # Load libraries
 library(sf)
 library(tidyverse)
