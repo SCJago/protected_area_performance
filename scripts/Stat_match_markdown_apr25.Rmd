@@ -1,0 +1,1056 @@
+---
+title: "Apr_25_statistical_matching_markdown"
+author: "Sophie Jago"
+date: "2025-04-01"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+```
+
+# SET UP
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+#set working directory
+ setwd("~/Papers/Ethiopia - PA history review/Counterfactual analysis/Updated_matching_apr25")
+
+#Load libraries
+library(MatchIt)
+library(cobalt)
+library(ggplot2)
+library(dplyr)
+library(ggplot2)
+library(Rmisc)
+library(forcats)
+library(sensemakr)
+library(ggsignif)
+library(ggpubr)
+library(marginaleffects)
+
+```
+
+
+# STEP 1: bring in sampled datasets 
+
+```{r STEP 1}
+
+#bring in pre matched sample datasets from pre-proccessing file
+gridcell_sample <- read.csv("df_sampled_gridcells_with_covariates_Mar25.csv")
+
+
+#household IDs are large numbers avoid them being converted to scientific notation by running:
+options(scipen = 999)
+household_sample <- read.csv("hh_type_cov_output_clean.csv")
+```
+
+
+# STEP 2: prepare and clean gridcell data
+
+```{r STEP 2}
+
+#remove PAs established after 2000
+gridcell_sample <- gridcell_sample[is.na(gridcell_sample$Earliest_year) | (gridcell_sample$Earliest_year <= 2000), ]
+
+PA_year <- read.csv("Earliest_PA_year.csv")
+household_sample <- full_join(household_sample, PA_year, by = "Name_PAs")
+household_sample <- household_sample[!is.na(household_sample$type), ]
+household_sample <- household_sample[is.na(household_sample$Earliest_year) | (household_sample$Earliest_year <= 2000), ]
+
+#separate gridcell sample into strict and less strict
+PA_strictness <- read.csv("PA_strictness.csv")
+gridcell_sample <- full_join(gridcell_sample, PA_strictness, by = "Name_PAs")
+
+#Name continuous covariates
+COVAR_full <- c("Elevation", "Precipitation", "Access", "Forest", "Population", "Slope", "Temperature", "Agriculture", "Agri_suitability", "Ethnicity1", "Grassland")
+COVAR_min <- c("Elevation", "Precipitation",  "Slope", "Temperature",  "Agri_suitability", "Ethnicity1")
+
+#clean
+gridcell_sample_clean <- gridcell_sample %>%
+  filter(!is.na(Forest_change) & 
+         !is.na(Percent_agriculturechange) & 
+         !is.na(Percent_grass_change) & 
+         if_all(all_of(COVAR_full), ~ !is.na(.)) &
+         !is.na(Ecoregion) & 
+         !is.na(Land)) 
+
+
+```
+
+
+# STEP 3: strict PA matching
+
+```{r STEP 3}
+#Bring in samples
+S_sample <-  gridcell_sample_clean %>%
+  filter((type == 1 & Strictness == "Strict") | type == 0)
+
+#make sure type is factor
+S_sample$type <- as.factor(S_sample$type) #make sure type is factor
+
+write.csv(S_sample, "S_sample.csv")
+
+
+#check prematch spread of data between treatment and control
+par(mfrow=c(4,3), cex = 0.5)
+pre_match_boxplot_S <- for (i in 1:length(COVAR_full)) {
+  form <- as.formula(paste(c("S_sample$", COVAR_full[i],"~ S_sample$type"), collapse=""))
+  ttest <- round(t.test(form)$estimate,1)
+  boxplot(form,data=S_sample,col=c("grey","darkgreen"),xlab=COVAR_full[i],ylab = "", cex.lab=2, cex.axis=2, notch=TRUE, outline=FALSE, horizontal = TRUE) }
+
+
+#Null match 
+m.out0_S <- matchit(as.formula(paste0("type~",paste0(COVAR_full, collapse='+'))),data = S_sample,  method = NULL, distance = "glm")
+
+#Add categorical variables 
+S_sample$Land <- as.factor(S_sample$Land)
+S_sample$Ecoregion <- as.factor(S_sample$Ecoregion)
+COVAR.ex <- c("Land", "Ecoregion") #name categorical variable
+
+# Nearest neighbour match for continuous covariates and exact match for categorical 
+m.out.1_S <- matchit(as.formula(paste0("type~", paste0(COVAR_full, collapse='+'))), data = S_sample, method = "nearest", distance = "glm", exact = COVAR.ex)
+
+#Calculate calipers (SD of propensity score)
+m.out.test_S=matchit(as.formula(paste0("type~",paste0(COVAR_full, collapse='+'))),method="nearest",data=S_sample)
+m.out.test_S=match.data(m.out.test_S)
+ps.sd_S=sd(m.out.test_S$distance)
+0.5*ps.sd_S #0.038
+
+#Introduce calipers to match
+m.out.2_S=matchit(as.formula(paste0("type~",paste0(COVAR_full, collapse='+'))), data = S_sample, method="nearest",caliper=0.5*ps.sd_S, exact = COVAR.ex)
+
+#Caliper with replacement 
+m.out.3_S=matchit(as.formula(paste0("type~",paste0(COVAR_full, collapse='+'))), data = S_sample, method="nearest", replace = TRUE,caliper=0.5*ps.sd_S, exact = COVAR.ex)
+
+#Match 4: matching with mahalanobis
+m.out.4_S <- matchit(as.formula(paste0("type~", paste0(COVAR_full, collapse='+'))),
+                      method = "nearest", distance = "mahalanobis", data = S_sample, exact = COVAR.ex)
+
+#Match 5: matching with mahalanobis replace
+m.out.5_S <- matchit(as.formula(paste0("type~", paste0(COVAR_full, collapse='+'))),
+                      method = "nearest", distance = "mahalanobis", data = S_sample, replace = TRUE, exact = COVAR.ex)
+```
+
+# STEP 4: check matched balance + treated units for strict PAs
+
+```{r STEP 4}
+#check results
+bal.tab(m.out0_S,  thresholds = c(m = .25))
+
+bal.tab(m.out.1_S,  thresholds = c(m = .25))  
+
+bal.tab(m.out.2_S,  thresholds = c(m = .25)) #all balanced, 2396/2853 treated 84%, least ppt -0.17
+summary(m.out.2_S)
+
+bal.tab(m.out.3_S,  thresholds = c(m = .25)) #all balanced, 2639/2853 treated 93%, but 1024 (ESS) control, least ppt -0.16
+summary(m.out.3_S)
+
+bal.tab(m.out.4_S,  thresholds = c(m = .25)) 
+
+bal.tab(m.out.5_S,  thresholds = c(m = .25)) 
+
+
+#Plotting mean SD - can visualise covariate balance of each
+par(mfrow = c(1,1))
+
+png('mout3_balplot_S.png', width = 15, height = 15, units = "cm", res = 300)
+plot(summary(m.out.3_S, subclass = TRUE),
+     var.order = "unmatched", abs = FALSE, threshold=0.25)
+dev.off()
+
+
+#Create love plot showing absolute mean differences of all tested matching approaches
+v_S <- data.frame(old = c("Elevation", "Precipitation", "Access", "Forest", "Population", "Slope", "Temperature", "Agriculture", "Agri_suitability", "Ethnicity1", "Grassland")) #set variable names
+
+Love_plot_S <- love.plot(type~Elevation + Precipitation + Access + Forest + Population + Slope + Temperature + Agriculture + Agri_suitability + Ethnicity1 + Grassland, 
+                          data = S_sample, estimand = "ATT", stats = c("mean.diffs"), 
+                          weights = list(M1 =(m.out.1_S), M2 = (m.out.2_S), M3 = (m.out.3_S),M4 = (m.out.4_S), M5 = (m.out.5_S)),
+                          var.order = "alphabetical",abs = TRUE, line = F, thresholds = c(m = .25), var.names = v_S,  
+                          sample.names = c("Unmatched", "NN PSM","NN PSM, caliper w/o replacement (83%)","NN PSM, caliper with replacement (93%)", "NN mahalanobis w/o replacement", "NN mahalanobis with replacement"),
+                          limits = c(0, 1.0), theme(legend.position = c(-1, 1), legend.box.background = element_rect(), legend.box.margin = margin(1, 1, 1, 1), text = 12)
+)
+
+Love_plot_S
+
+
+#save
+final_data_S=match.data(m.out.3_S)
+
+#post-match boxplot less strict
+par(mfrow=c(4,3), cex = 0.5)
+post_match_boxplot_S <- for (i in 1:length(COVAR_full)) {
+  form <- as.formula(paste(c("final_data_S$", COVAR_full[i],"~ final_data_S$type"), collapse=""))
+  ttest <- round(t.test(form)$estimate,1)
+  boxplot(form,data=final_data_S,col=c("grey","darkgreen"),xlab=COVAR_full[i],ylab = "", cex.lab=2, cex.axis=2, notch=TRUE, outline=FALSE, horizontal = TRUE) }
+
+#Save data containing matched sample
+write.csv(final_data_S,file="S_match_mout3.csv")
+```
+
+# STEP 5: test senstivity of strict PA matching
+
+```{r STEP 5}
+final_data_S_sensmakr <- final_data_S
+final_data_S_sensmakr$type <- as.numeric(final_data_S_sensmakr$type)
+final_data_S_sensmakr$Land <- as.numeric(final_data_S_sensmakr$Land)
+final_data_S_sensmakr$Ecoregion <- as.numeric(final_data_S_sensmakr$Ecoregion)
+str(final_data_S_sensmakr)
+
+#set up models
+mod_S_agri = lm(Percent_agriculturechange~type+Elevation + Precipitation + Access + Forest + Population + Slope + Temperature + Agriculture + Agri_suitability + Ethnicity1 + Grassland + Land + Ecoregion,data = final_data_S_sensmakr)
+mod_S_grass = lm(Percent_grass_change~type+Elevation + Precipitation + Access + Forest + Population + Slope + Temperature + Agriculture + Agri_suitability + Ethnicity1 + Grassland + Land + Ecoregion,data = final_data_S_sensmakr)
+mod_S_forest = lm(Forest_change~type+Elevation + Precipitation + Access + Forest + Population + Slope + Temperature + Agriculture + Agri_suitability + Ethnicity1 + Grassland + Land + Ecoregion,data = final_data_S_sensmakr)
+
+#run sensemakr
+grass_S_sensmakr <- sensemakr(model = mod_S_grass, 
+                               treatment = "type",
+                               benchmark_covariates = "Population",
+                               kd = 1:9,
+                               ky = 1:9, 
+                               q = 1,
+                               alpha = 0.05, 
+                               reduce = T)
+
+summary(grass_S_sensmakr)
+#report_grass_S_sensemakr <- ovb_minimal_reporting(grass_S_sensmakr, format = "pure_html")
+#write(report_grass_S_sensemakr, file = "report_grass_S_sensemakr.html")
+
+
+agri_S_sensmakr <- sensemakr(model = mod_S_agri, 
+                              treatment = "type",
+                              benchmark_covariates = "Population",
+                              kd = 1:9,
+                              ky = 1:9, 
+                              q = 1,
+                              alpha = 0.05, 
+                              reduce = T)
+
+summary(agri_S_sensmakr)
+#report_agri_S_sensemakr <- ovb_minimal_reporting(agri_S_sensmakr, format = "pure_html")
+#write(report_agri_S_sensemakr, file = "report_agri_S_sensemakr.html")
+
+
+forest_S_sensmakr <- sensemakr(model = mod_S_forest, 
+                                treatment = "type",
+                                benchmark_covariates = "Population",
+                                kd = 1:9,
+                                ky = 1:9, 
+                                q = 1,
+                                alpha = 0.05, 
+                                reduce = T)
+
+summary(forest_S_sensmakr)
+#report_forest_S_sensemakr <- ovb_minimal_reporting(forest_S_sensmakr, format = "pure_html")
+#write(report_forest_S_sensemakr, file = "report_forest_S_sensemakr.html")
+```
+
+
+# STEP 6: less strict matching 
+
+```{r STEP 6}
+
+#Bring in samples
+LS_sample <-  gridcell_sample_clean %>%
+  filter((type == 1 & Strictness == "Less Strict") | type == 0)
+
+#make sure type is factor
+LS_sample$type <- as.factor(LS_sample$type) #make sure type is factor
+write.csv(LS_sample, "LS_sample.csv")
+
+
+#check prematch spread of data between treatment and controls
+par(mfrow=c(4,3), cex = 0.5)
+pre_match_boxplot_LS <- for (i in 1:length(COVAR_full)) {
+  form <- as.formula(paste(c("LS_sample$", COVAR_full[i],"~ LS_sample$type"), collapse=""))
+  ttest <- round(t.test(form)$estimate,1)
+  boxplot(form,data=LS_sample,col=c("grey","darkgreen"),xlab=COVAR_full[i],ylab = "", cex.lab=2, cex.axis=2, notch=TRUE, outline=FALSE, horizontal = TRUE) }
+
+
+#Null match 
+m.out0_LS <- matchit(as.formula(paste0("type~",paste0(COVAR_full, collapse='+'))),data = LS_sample,  method = NULL, distance = "glm")
+
+#Add categorical variables 
+LS_sample$Land <- as.factor(LS_sample$Land)
+LS_sample$Ecoregion <- as.factor(LS_sample$Ecoregion)
+COVAR.ex <- c("Land", "Ecoregion") #name categorical variable
+
+# Nearest neighbour match for continuous covariates and exact match for categorical 
+m.out.1_LS <- matchit(as.formula(paste0("type~", paste0(COVAR_full, collapse='+'))), data = LS_sample, method = "nearest", distance = "glm", exact = COVAR.ex)
+
+#Calculate calipers (SD of propensity score)
+m.out.test_LS=MatchIt::matchit(as.formula(paste0("type~",paste0(COVAR_full, collapse='+'))),method="nearest",data=LS_sample)
+m.out.test_LS=match.data(m.out.test_LS)
+ps.sd_LS=sd(m.out.test_LS$distance)
+0.5*ps.sd_LS #0.078
+
+#Introduce calipers to match
+m.out.2_LS=matchit(as.formula(paste0("type~",paste0(COVAR_full, collapse='+'))), data = LS_sample, method="nearest",caliper=0.5*ps.sd_LS, exact = COVAR.ex)
+
+#Caliper with replacement 
+m.out.3_LS=matchit(as.formula(paste0("type~",paste0(COVAR_full, collapse='+'))), data = LS_sample, method="nearest", replace = TRUE,caliper=0.5*ps.sd_LS, exact = COVAR.ex)
+
+#Match 4: matching with mahalanobissum
+m.out.4_LS <- matchit(as.formula(paste0("type~", paste0(COVAR_full, collapse='+'))),
+                      method = "nearest", distance = "mahalanobis", data = LS_sample, exact = COVAR.ex)
+
+#Match 5: matching with mahalanobissum
+m.out.5_LS <- matchit(as.formula(paste0("type~", paste0(COVAR_full, collapse='+'))),
+                      method = "nearest", distance = "mahalanobis", data = LS_sample, replace = TRUE, exact = COVAR.ex)
+```
+
+# STEP 7: check balance and no treated units from matching for less strict
+
+```{r STEP 7}
+#check results
+bal.tab(m.out0_LS,  thresholds = c(m = .25))
+
+bal.tab(m.out.1_LS,  thresholds = c(m = .25))  #all balanced, max diff = 0.14, 4454/4557 (98%) treated
+summary(m.out.1_LS)
+ 
+bal.tab(m.out.2_LS,  thresholds = c(m = .25)) #all balanced, max diff 0.11, 4236/4557 (93%) treated
+summary(m.out.2_LS)
+
+bal.tab(m.out.3_LS,  thresholds = c(m = .25)) #all balanced, max diff 0.12, 4398/4557 (97%) treated, but only 2656 (ESS) control
+
+bal.tab(m.out.4_LS,  thresholds = c(m = .25)) #all balanced, max diff 0.13, 4454/4557 (98%) treated
+summary(m.out.4_LS)
+
+bal.tab(m.out.5_LS,  thresholds = c(m = .25)) #all balanced, max diff 0.07, 4557/4557 (99.9%) treated, but only 638 (ESS) control 
+
+#Plotting mean SD - can visualise covariate balance of each
+par(mfrow = c(1,1))
+plot(summary(m.out.4_LS, subclass = TRUE),
+     var.order = "unmatched", abs = FALSE, threshold=0.25)
+
+
+#Create love plot showing absolute mean differences of all tested matching approaches
+v_LS <- data.frame(old = c("Elevation", "Precipitation", "Access", "Forest", "Population", "Slope", "Temperature", "Agriculture", "Agri_suitability", "Ethnicity1", "Grassland")) #set variable names
+
+Love_plot_LS <- love.plot(type~Elevation + Precipitation + Access + Forest + Population + Slope + Temperature + Agriculture + Agri_suitability + Ethnicity1 + Grassland, 
+                          data = LS_sample, estimand = "ATT", stats = c("mean.diffs"), 
+                          weights = list(M1 =(m.out.1_LS), M2 = (m.out.2_LS), M3 = (m.out.3_LS),M4 = (m.out.4_LS), M5 = (m.out.5_LS)),
+                          var.order = "alphabetical",abs = TRUE, line = F, thresholds = c(m = .25), var.names = v_LS,  
+                          sample.names = c("Unmatched", "PSM NN (98%)","PSM NN, caliper w/o replacement (87.6%)","PSM NN, caliper with replacement (81%)", "Mahalanobis NN w/o replacement (96%)", "Mahalanobis NN with replacement (99.9%)"),
+                          limits = c(0, 1.0), theme(legend.position = c(-1, 1), legend.box.background = element_rect(), legend.box.margin = margin(1, 1, 1, 1), text = 12)
+)
+
+Love_plot_LS
+
+#save
+final_data_LS=match.data(m.out.4_LS)
+                         
+#less strict post match box plots
+par(mfrow=c(4,3), cex = 0.5)
+post_match_boxplot_LS <- for (i in 1:length(COVAR_full)) {
+  form <- as.formula(paste(c("final_data_LS$", COVAR_full[i],"~ final_data_LS$type"), collapse=""))
+  ttest <- round(t.test(form)$estimate,1)
+  boxplot(form,data=final_data_LS,col=c("grey","darkgreen"),xlab=COVAR_full[i],ylab = "", cex.lab=2, cex.axis=2, notch=TRUE, outline=FALSE, horizontal = TRUE) }
+
+
+#Save data containing matched sample
+write.csv(final_data_LS,file="LS_match_mout4.csv")
+
+```
+
+# STEP 8: test senstivity of less strict matching
+
+```{r STEP 8}
+final_data_LS_sensmakr <- final_data_LS
+final_data_LS_sensmakr$type <- as.numeric(final_data_LS_sensmakr$type)
+final_data_LS_sensmakr$Land <- as.numeric(final_data_LS_sensmakr$Land)
+final_data_LS_sensmakr$Ecoregion <- as.numeric(final_data_LS_sensmakr$Ecoregion)
+str(final_data_LS_sensmakr)
+
+#set up models
+mod_LS_agri = lm(Percent_agriculturechange~type+Elevation + Precipitation + Access + Forest + Population + Slope + Temperature + Agriculture + Agri_suitability + Ethnicity1 + Grassland + Land + Ecoregion,data = final_data_LS_sensmakr)
+mod_LS_grass = lm(Percent_grass_change~type+Elevation + Precipitation + Access + Forest + Population + Slope + Temperature + Agriculture + Agri_suitability + Ethnicity1 + Grassland + Land + Ecoregion,data = final_data_LS_sensmakr)
+mod_LS_forest = lm(Forest_change~type+Elevation + Precipitation + Access + Forest + Population + Slope + Temperature + Agriculture + Agri_suitability + Ethnicity1 + Grassland + Land + Ecoregion,data = final_data_LS_sensmakr)
+
+
+#run sensemakr
+grass_LS_sensmakr <- sensemakr(model = mod_LS_grass, 
+                               treatment = "type",
+                               benchmark_covariates = "Population",
+                               kd = 1:9,
+                               ky = 1:9, 
+                               q = 1,
+                               alpha = 0.05, 
+                               reduce = T)
+
+summary(grass_LS_sensmakr)
+#report_grass_LS_sensemakr <- ovb_minimal_reporting(grass_LS_sensmakr, format = "pure_html")
+#write(report_grass_LS_sensemakr, file = "report_grass_LS_sensemakr.html")
+
+
+agri_LS_sensmakr <- sensemakr(model = mod_LS_agri, 
+                              treatment = "type",
+                              benchmark_covariates = "Population",
+                              kd = 1:9,
+                              ky = 1:9, 
+                              q = 1,
+                              alpha = 0.05, 
+                              reduce = T)
+
+summary(agri_LS_sensmakr)
+#report_agri_LS_sensemakr <- ovb_minimal_reporting(agri_LS_sensmakr, format = "pure_html")
+#write(report_agri_LS_sensemakr, file = "report_agri_LS_sensemakr.html")
+
+
+forest_LS_sensmakr <- sensemakr(model = mod_LS_forest, 
+                                treatment = "type",
+                                benchmark_covariates = "Population",
+                                kd = 1:9,
+                                ky = 1:9, 
+                                q = 1,
+                                alpha = 0.05, 
+                                reduce = T)
+
+summary(forest_LS_sensmakr)
+#report_forest_LS_sensemakr <- ovb_minimal_reporting(forest_LS_sensmakr, format = "pure_html")
+#write(report_forest_LS_sensemakr, file = "report_forest_LS_sensemakr.html")
+
+```
+
+# STEP 9: test biophysical outputs
+
+```{r STEP 9}
+
+#t-tests
+t.test(Forest_change ~ type, data = final_data_LS, subset = type %in% c(0, 1)) # 1 = treatment, 0 = control
+t.test(Forest_change ~ type, data = final_data_S, subset = type %in% c(0, 1))
+
+t.test(Percent_agriculturechange ~ type, data = final_data_LS, subset = type %in% c(0, 1))
+t.test(Percent_agriculturechange ~ type, data = final_data_S, subset = type %in% c(0, 1))
+
+t.test(Percent_grass_change ~ type, data = final_data_LS, subset = type %in% c(0, 1))
+t.test(Percent_grass_change ~ type, data = final_data_S, subset = type %in% c(0, 1))
+
+#regression
+Forest_LS_regression <- lm(Forest_change~type+Elevation + Precipitation + Access + Forest + Population + Slope + Temperature + Agriculture + Agri_suitability + Ethnicity1 + Grassland + Land + Ecoregion, weights = final_data_LS$weights, data = final_data_LS)
+summary(Forest_LS_regression)
+ATE_forest_LS <- avg_comparisons(Forest_LS_regression,
+                variables = "type",
+                vcov = ~subclass,
+                weights = final_data_S$weights)
+ATE_forest_LS
+
+Forest_S_regression <- lm(Forest_change~type+Elevation + Precipitation + Access + Forest + Population + Slope + Temperature + Agriculture + Agri_suitability + Ethnicity1 + Grassland + Land + Ecoregion, weights = final_data_S$weights , data = final_data_S)
+summary(Forest_S_regression)
+ATE_forest_S <- avg_comparisons(Forest_S_regression,
+                variables = "type",
+                vcov = ~subclass, 
+                weights = final_data_S$weights)
+ATE_forest_S
+
+
+
+Agri_LS_regression <- lm(Percent_agriculturechange~type+Elevation + Precipitation + Access + Forest + Population + Slope + Temperature + Agriculture + Agri_suitability + Ethnicity1 + Grassland + Land + Ecoregion, weights = final_data_LS$weights, data = final_data_LS)
+summary(Agri_LS_regression)
+ATE_agri_LS <-avg_comparisons(Agri_LS_regression,
+                variables = "type",
+                vcov = ~subclass,
+                weights = final_data_LS$weights)
+ATE_agri_LS
+
+Agri_S_regression <- lm(Percent_agriculturechange~type+Elevation + Precipitation + Access + Forest + Population + Slope + Temperature + Agriculture + Agri_suitability + Ethnicity1 + Grassland + Land + Ecoregion, weights = final_data_S$weights, data = final_data_S)
+summary(Agri_S_regression)
+ATE_agri_S <- avg_comparisons(Agri_S_regression,
+                variables = "type",
+                vcov = ~subclass,
+                weights = final_data_S$weights)
+ATE_agri_S
+
+Grass_LS_regression <- lm(Percent_grass_change~type+Elevation + Precipitation + Access + Forest + Population + Slope + Temperature + Agriculture + Agri_suitability + Ethnicity1 + Grassland + Land + Ecoregion, weights = final_data_LS$weights, data = final_data_LS)
+summary(Grass_LS_regression)
+ATE_grass_LS <- avg_comparisons(Grass_LS_regression,
+                variables = "type",
+                vcov = ~subclass,
+                weights = final_data_LS$weights)
+ATE_grass_LS
+
+Grass_S_regression <- lm(Percent_grass_change~type+Elevation + Precipitation + Access + Forest + Population + Slope + Temperature + Agriculture + Agri_suitability + Ethnicity1 + Grassland + Land + Ecoregion, weights = final_data_S$weights, data = final_data_S)
+summary(Grass_S_regression)
+ATE_grass_S <- avg_comparisons(Grass_S_regression,
+                variables = "type",
+                vcov = ~subclass,
+                weights = final_data_S$weights)
+ATE_grass_S
+
+ATE_all_env <- bind_rows(ATE_forest_LS, ATE_forest_S, ATE_agri_LS, ATE_agri_S, ATE_grass_LS, ATE_grass_S)
+ATE_all_env <- ATE_all_env %>%
+  mutate(Outcome = c("Forest LS", "Forest S", "Agriculture LS", "Agriculture S", "Grass LS", "Grass S")[1:n()])
+
+
+# Add significance indicator
+ATE_all_env <- ATE_all_env %>%
+  mutate(Significance = ifelse(p.value <= 0.05, "p ≤ 0.05", "p > 0.05"))
+
+# Plot all comparisons in one figure
+ggplot(ATE_all_env, aes(x = estimate, y = Outcome, xmin = conf.low, xmax = conf.high, color = Significance)) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black") +  # Zero reference line
+  geom_point(size = 3) +  # Effect size points
+  geom_errorbarh(height = 0.2) +  # Horizontal confidence intervals
+  scale_color_manual(values = c("p ≤ 0.05" = "darkgreen", "p > 0.05" = "darkgrey")) +  # Custom colors
+  theme_minimal() +
+  labs(title = "Average Treatment Effects for Different Outcomes",
+       x = "Estimated Effect (with 95% CI)",
+       y = "Outcome Variable",
+       color = "Significance") +
+  theme(legend.position = "bottom")
+
+```
+
+# STEP 10: plot forest output
+
+```{r STEP 10}
+#get averages for forest
+confidenceForestLoss_S <- summarySE(final_data_S, measurevar="Forest_change", groupvars=c("type"))
+confidenceForestLoss_LS <- summarySE(final_data_LS, measurevar="Forest_change", groupvars=c("type"))
+
+#set up joined dataframe
+Confidence_S_LS <- rbind(confidenceForestLoss_S, confidenceForestLoss_LS)
+
+S_LS_dimension <- c("Control (strict)", "Treatment (strict)", "Control (less strict)", "Treatment (less strict)")
+
+Confidence_S_LS$Dimension <- S_LS_dimension
+
+Confidence_S_LS <- Confidence_S_LS %>%
+  mutate(Group = factor(ifelse(grepl("less strict", Dimension), "Less Strict", "Strict"), levels = c("Strict", "Less Strict")))
+
+#plot
+Forest_change_S_LS_barchart <- ggplot(Confidence_S_LS, aes(x=fct_relevel(Dimension, c("Control (strict)", "Treatment (strict)", "Control (less strict)", "Treatment (less strict)")),
+                                                           y=Forest_change, fill = Dimension)) + 
+  geom_bar(stat = "identity", width = 0.9, position = position_dodge(width = 0.5), colour = "black") + 
+  geom_errorbar(position = position_dodge(width = 0.5), aes(ymin=Forest_change-ci, ymax=Forest_change+ci, width =0.25)) +
+  theme_classic (base_size = 14) + labs (x = "", y = "Change in % land cover (Forest)") +
+  scale_x_discrete(labels = c("Control", "Treatment", "Control", "Treatment"), position = "top") +
+  scale_y_continuous(limits = c(-0.85,0), expand = c(0,0))+ 
+  scale_fill_manual(values = c("#E1E1E1", "#E1E1E1", "#D3FFBE", "#38A800"), labels = c( "TControl (strict)", "Treatment (strict)", "Control (less strict)", "Treatment (less strict)")) + 
+  facet_wrap(~ Group, scales = "free_x", strip.position = "top") + 
+  theme(legend.position = "none", legend.title = element_blank(), legend.background = element_blank(), 
+        axis.ticks.x = element_blank(),  axis.text.x = element_text(size = 14, colour = 'black'),
+        strip.placement = "outside", strip.background=element_rect(color="white", fill="white"), strip.text = element_text(size = 14, colour = "black", face = "bold"),
+        plot.margin = unit(c(0, .5, 1, .5), "cm"))
+
+
+Forest_change_S_LS_barchart <-Forest_change_S_LS_barchart + 
+  geom_signif(
+    data = subset(Confidence_S_LS, Group == "Strict"),
+    xmin = 1, xmax = 2, annotation = c("*"),
+    y_position = -0.4,
+    tip_length = -0.01,
+    vjust = 1.8
+  ) +
+  geom_signif(
+    data = subset(Confidence_S_LS, Group == "Less Strict"),
+    xmin = 1, xmax = 2, annotation = c(""),
+    y_position = -0.85,
+    tip_length = -0.01,
+    vjust = 1.8
+  )
+Forest_change_S_LS_barchart
+```
+
+# STEP 11: Plot agriculture output
+
+```{r STEP 11}
+
+#get averages
+confidenceAgrichange_S <- summarySE(final_data_S, measurevar="Percent_agriculturechange", groupvars=c("type"))
+confidenceAgrichange_LS <- summarySE(final_data_LS, measurevar="Percent_agriculturechange", groupvars=c("type"))
+
+#set up joined dataframe
+Confidence_S_LS_agri <- rbind(confidenceAgrichange_S, confidenceAgrichange_LS)
+S_LS_dimension <- c("Control (strict)", "Treatment (strict)", "Control (less strict)", "Treatment (less strict)")
+Confidence_S_LS_agri$Dimension <- S_LS_dimension
+
+Confidence_S_LS_agri <- Confidence_S_LS_agri %>%
+  mutate(Group = factor(ifelse(grepl("less strict", Dimension), "Less Strict", "Strict"), levels = c("Strict", "Less Strict")))
+
+
+#plot
+Agri_change_S_LS_barchart <- ggplot(Confidence_S_LS_agri, aes(x=fct_relevel(Dimension, c("Control (strict)", "Treatment (strict)", "Control (less strict)", "Treatment (less strict)")),
+                                                              y=Percent_agriculturechange, fill = Dimension)) + 
+  geom_bar(stat = "identity", width = 0.9, position = position_dodge(width = 0.5), colour = "black") + 
+  geom_errorbar(position = position_dodge(0.1), aes(ymin=Percent_agriculturechange-ci, ymax=Percent_agriculturechange+ci, width =0.2)) +
+  theme_classic (base_size = 14) + labs (x = "", y = "Change in % land cover (Cropland)") + 
+  scale_x_discrete(labels = c("Control", "Treatment", "Control", "Treatment"), position = "bottom") +
+  scale_y_continuous(limits = c(0,2.2), expand = c(0,0))+ 
+  scale_fill_manual(values = c("#E1E1E1", "#E1E1E1", "#D3FFBE", "#38A800"), labels = c("Control (strict)", "Treatment (strict)", "Control (less strict)", "Treatment (less strict)")) + 
+  facet_wrap(~ Group, scales = "free_x", strip.position = "bottom") + 
+  theme(legend.position = "none", legend.title = element_blank(), legend.background = element_blank(),
+        axis.ticks.x = element_blank(),  axis.text.x = element_text(size = 14, colour = 'black'), 
+        strip.placement = "outside", strip.background=element_rect(color="white", fill="white"), strip.text = element_text(size = 14, colour = "black", face = "bold"),
+        plot.margin = unit(c(.5, .5, .5, .5), "cm")) 
+
+Agri_change_S_LS_barchart <-Agri_change_S_LS_barchart + 
+  geom_signif(
+    data = subset(Confidence_S_LS_agri, Group == "Strict"),
+    xmin = 1, xmax = 2, annotation = c("***"),
+    y_position = 1.85,
+    tip_length = 0.01,
+    vjust = 0.7
+  ) +
+  geom_signif(
+    data = subset(Confidence_S_LS_agri, Group == "Less Strict"),
+    xmin = 1, xmax = 2, annotation = c("***"),
+    y_position = 2.1,
+    tip_length = 0.01,
+    vjust = 0.7
+  )
+
+Agri_change_S_LS_barchart
+```
+
+# STEP 12: Plot grass output
+
+```{r STEP 12}
+
+#get averages
+confidenceGrassChange_S <- summarySE(final_data_S, measurevar="Percent_grass_change", groupvars=c("type"))
+confidenceGrassChange_LS <- summarySE(final_data_LS, measurevar="Percent_grass_change", groupvars=c("type"))
+
+#set up joined dataframe
+Confidence_S_LS_grass <- rbind(confidenceGrassChange_S, confidenceGrassChange_LS)
+S_LS_dimension <- c("Control (strict)", "Treatment (strict)", "Control (less strict)", "Treatment (less strict)")
+Confidence_S_LS_grass$Dimension <- S_LS_dimension
+
+Confidence_S_LS_grass <- Confidence_S_LS_grass %>%
+  mutate(Group = factor(ifelse(grepl("less strict", Dimension), "Less Strict", "Strict"), levels = c("Strict", "Less Strict")))
+
+#plot
+Grass_change_S_LS_barchart <- ggplot(Confidence_S_LS_grass, aes(x=fct_relevel(Dimension, c("Control (strict)", "Treatment (strict)", "Control (less strict)", "Treatment (less strict)")),
+                                                                y=Percent_grass_change, fill = Dimension)) + 
+  geom_bar(stat = "identity", width = 0.9, position = position_dodge(width = 0.5), colour = "black") + 
+  geom_errorbar(position = position_dodge(0.1), aes(ymin=Percent_grass_change-ci, ymax=Percent_grass_change+ci, width =0.2)) +
+  theme_classic (base_size = 14) + labs (x = "", y = "Change in % land cover (Grassland)") + 
+  scale_x_discrete(labels = c("Control", "Treatment", "Control", "Treatment"), position = "bottom") +
+  geom_hline(yintercept = 0) +
+  scale_y_continuous(limits = c(-3,9), expand = c(0,0))+ 
+  scale_fill_manual(values = c("#E1E1E1", "#E1E1E1", "#D3FFBE", "#38A800"), labels = c("Control (strict)", "Treatment (strict)", "Control (less strict)", "Treatment (less strict)")) + 
+  facet_wrap(~ Group, scales = "free_x", strip.position = "bottom") + 
+  theme(axis.line.x = element_blank(), legend.position = "none", legend.title = element_blank(), legend.background = element_blank(), 
+        axis.ticks.x = element_blank(),  axis.text.x = element_text(size = 14, colour = 'black'), 
+        strip.placement = "outside", strip.background=element_rect(color="white", fill="white"), strip.text = element_text(size = 14, colour = "black", face = "bold"),
+        plot.margin = unit(c(.5, .5, .5, .5), "cm"))
+
+Grass_change_S_LS_barchart <- Grass_change_S_LS_barchart + 
+  geom_signif(
+    data = subset(Confidence_S_LS_grass, Group == "Strict"),
+    xmin = 1, xmax = 2, annotation = c("***"),
+    y_position = 8,
+    tip_length = 0.01,
+    vjust = 0.7
+  ) +
+  geom_signif(
+    data = subset(Confidence_S_LS_grass, Group == "Less Strict"),
+    xmin = 1, xmax = 2, annotation = c("***"),
+    y_position = -2.6,
+    tip_length = -0.01,
+    vjust = 1.8
+  )
+
+Grass_change_S_LS_barchart
+```
+
+# STEP 13: set up household data for matching 
+
+```{r STEP 13}
+#remove buffer households
+household_sample <- household_sample[household_sample$type != 2, ]
+
+#set type to factor
+household_sample$type <- as.factor(household_sample$type)
+
+hh_COVAR_full <- c("Elevation", "Precipitation", "Access", "Population", "Slope", "Temperature", "Agriculture", "Agri_suitability", "Ethnicity1")
+hh_COVAR_min <- c("Elevation", "Precipitation",  "Slope", "Temperature",  "Agri_suitability", "Ethnicity1")
+
+#clean 
+household_sample <- household_sample[!is.na(household_sample$type), ]
+
+household_sample_clean <- household_sample %>%
+  filter(!is.na(household_sample$MINS_change) & 
+         !is.na(household_sample$HDDS_change) & 
+         !is.na(household_sample$asset_change) & 
+         if_all(all_of(hh_COVAR_full), ~ !is.na(.)) &
+         !is.na(Ecoregion) & 
+         !is.na(Land)) 
+
+#remove ones where the PA was established after 2015
+household_sample_clean <- household_sample_clean[is.na(household_sample_clean$Earliest_year) | household_sample_clean$Earliest_year <= 2000, ]
+```
+
+# STEP 14: household statistical matching 
+
+```{r STEP 14}
+#ALL HOUSEHOLD MATCHING 
+
+# Remove rows where Temperature is below 1000
+household_sample_ALL <- household_sample_clean[household_sample_clean$Temperature >= 1000, ]
+write.csv(household_sample_ALL, "household_sample.csv")
+
+# Loop through each covariate and plot the histogram
+#par(mfrow = c(4, 4))  # Set plotting area for 9 plots (adjust if needed)
+#for (cov in hh_COVAR_full) {
+#  hist(household_sample_ALL[[cov]], main = paste("Histogram of", cov), xlab = cov)
+#}
+
+
+#household_sample_ALL$Log_Population <- log(household_sample_ALL$Population)
+#household_sample_ALL$Log_Access <- log(household_sample_ALL$Access)
+#household_sample_ALL$Log_Ethnicity1 <- log(household_sample_ALL$Ethnicity1+1)
+#household_sample_ALL$Sqrt_Agriculture<- sqrt(household_sample_ALL$Agriculture)
+#summary(household_sample_ALL$Log_Access)
+#summary(household_sample_ALL$Log_Population)
+#summary(household_sample_ALL$Sqrt_Agriculture)
+#summary(household_sample_ALL$Log_Ethnicity1)
+
+#Subset continuous co-variates 
+#hh_COVAR_full_logged <- c("Elevation", "Precipitation", "Access", "Population", "Slope", "Temperature", "Agriculture","Agri_suitability", "Ethnicity1")
+
+
+#make pre match boxplots showing spread of data
+par(mfrow=c(4,3), cex = 0.5)
+pre_match_boxplot_hh_outputs <- for (i in 1:length(hh_COVAR_full)) {
+  form <- as.formula(paste(c("household_sample_ALL$", hh_COVAR_full[i],"~ household_sample_ALL$type"), collapse=""))
+  ttest <- round(t.test(form)$estimate,1)
+  boxplot(form,data=household_sample_ALL,col=c("grey","darkgreen"),xlab=hh_COVAR_full[i],ylab = "", cex.lab=2, cex.axis=2, notch=TRUE, outline=FALSE, horizontal = TRUE) }
+
+#Null match 
+m.out0_hh_ALL <- matchit(as.formula(paste0("type~",paste0(hh_COVAR_full, collapse='+'))),data = household_sample_ALL,  method = NULL, distance = "glm")
+
+#Add categorical variables 
+household_sample_ALL$Land <- as.factor(household_sample_ALL$Land)
+household_sample_ALL$Ecoregion <- as.factor(household_sample_ALL$Ecoregion)
+COVAR.ex_hh <- c( "Ecoregion") #name categorical variable
+
+# Nearest neighbour match for continuous covariates and exact match for categorical 
+m.out.1_hh_ALL <- matchit(as.formula(paste0("type~", paste0(hh_COVAR_full, collapse='+'))), data = household_sample_ALL, method = "nearest", distance = "glm")
+
+#Calculate calipers (SD of propensity score)
+m.out.test_hh_ALL=matchit(as.formula(paste0("type~",paste0(hh_COVAR_full, collapse='+'))),method="nearest",data=household_sample_ALL)
+test_data_hh_ALL=match.data(m.out.test_hh_ALL)
+ps.sd_hh_ALL=sd(test_data_hh_ALL$distance)
+01*ps.sd_hh_ALL # 0.12
+
+#Introduce calipers to match
+m.out.2_hh_ALL=matchit(as.formula(paste0("type~",paste0(hh_COVAR_full, collapse='+'))), data = household_sample_ALL, method="nearest",caliper=1*ps.sd_hh_ALL)
+
+
+#Caliper with replacement 
+m.out.3_hh_ALL=matchit(as.formula(paste0("type~",paste0(hh_COVAR_full, collapse='+'))), data = household_sample_ALL, method="nearest", replace = TRUE,caliper=1*ps.sd_hh_ALL)
+
+#Match 4: matching with mahalanobis
+m.out.4_hh_ALL <- matchit(as.formula(paste0("type~", paste0(hh_COVAR_full, collapse='+'))),
+                         method = "nearest", distance = "mahalanobis", data = household_sample_ALL)
+
+
+#Match 5: matching with mahalanobis with replacement
+m.out.5_hh_ALL <- matchit(as.formula(paste0("type~", paste0(hh_COVAR_full, collapse='+'))),
+                         method = "nearest", distance = "mahalanobis",data = household_sample_ALL, replace = TRUE)
+
+#Match 6: matching with genetic mahalanobis
+m.out.6_hh_ALL <- matchit(as.formula(paste0("type~", paste0(hh_COVAR_full, collapse='+'))),
+                         method = "genetic", distance = "mahalanobis", pop.size = 200, data = household_sample_ALL, replace = FALSE)
+
+#Match 6: matching with genetic glm
+m.out.6_hh_glm_ALL <- matchit(as.formula(paste0("type~", paste0(hh_COVAR_full, collapse='+'))),
+                             method = "genetic", distance = "glm", pop.size = 200, data = household_sample_ALL, replace = FALSE)
+
+#Match 7: matching with optimal mahalanobis
+m.out.7_hh_ALL <- matchit(as.formula(paste0("type~", paste0(hh_COVAR_full, collapse='+'))),
+                         method = "optimal", distance = "mahalanobis", data = household_sample_ALL, replace = FALSE)
+
+#Match 7: matching with optimal glm
+m.out.7_hh_glm_ALL <- matchit(as.formula(paste0("type~", paste0(hh_COVAR_full, collapse='+'))),
+                          method = "optimal", distance = "glm", data = household_sample_ALL, replace = FALSE)
+
+#Match 8: matching with full mahalanobis
+m.out.8_hh_ALL <- matchit(as.formula(paste0("type~", paste0(hh_COVAR_full, collapse='+'))),
+                         method = "full", distance = "mahalanobis", data = household_sample_ALL, replace = FALSE)
+
+#Match 8: matching with full glm
+m.out.8_hh_glm_ALL <- matchit(as.formula(paste0("type~", paste0(hh_COVAR_full, collapse='+'))),
+                          method = "full", distance = "glm", data = household_sample_ALL, replace = FALSE)
+```
+
+# STEP 15: check balance and no treated units for household matching 
+
+```{r STEP 15}
+#check results
+bal.tab(m.out0_hh_ALL,  thresholds = c(m = .25)) 
+
+bal.tab(m.out.1_hh_ALL,  thresholds = c(m = .25)) 
+
+bal.tab(m.out.2_hh_ALL,  thresholds = c(m = .25)) #75% all balanced 0.11
+summary(m.out.2_hh_ALL)
+
+bal.tab(m.out.3_hh_ALL,  thresholds = c(m = .25)) 
+
+bal.tab(m.out.4_hh_ALL,  thresholds = c(m = .25)) 
+
+bal.tab(m.out.5_hh_ALL,  thresholds = c(m = .25)) 
+
+bal.tab(m.out.6_hh_ALL,  thresholds = c(m = .25))
+
+bal.tab(m.out.6_hh_glm_ALL,  thresholds = c(m = .25)) 
+
+bal.tab(m.out.7_hh_ALL,  thresholds = c(m = .25)) 
+
+bal.tab(m.out.7_hh_glm_ALL,  thresholds = c(m = .25))
+
+bal.tab(m.out.8_hh_ALL,  thresholds = c(m = .25))
+
+bal.tab(m.out.8_hh_glm_ALL,  thresholds = c(m = .25))
+ 
+#Plotting mean SD
+par(mfrow = c(1,1))
+
+plot(summary(m.out.2_hh_ALL, subclass = TRUE),
+     var.order = "unmatched", abs = FALSE, threshold=0.25)
+
+
+
+#Love plot to view all matching options tested
+
+v_hh <- data.frame(old = c("Elevation", "Precipitation", "Access", "Population", "Slope", "Temperature", "Agriculture", "Agri_suitability", "Ethnicity1"))
+
+Love_plot_hh <- love.plot(type~Elevation+Precipitation+Access+Population+Slope+Temperature+Agriculture+Agri_suitability+Ethnicity1, 
+                          data = household_sample_ALL, estimand = "ATT", stats = c("mean.diffs"), 
+                          weights = list(M1 =(m.out.1_hh_ALL), M2 = (m.out.2_hh_ALL), M3 = (m.out.3_hh_ALL),M4 = (m.out.4_hh_ALL), M5 = (m.out.5_hh_ALL),
+                                         M6 =(m.out.6_hh_ALL), M6.1 = (m.out.6_hh_glm_ALL), M7 = (m.out.7_hh_ALL),M7.1 = (m.out.7_hh_glm_ALL), M8 = (m.out.8_hh_ALL), M8.1 = (m.out.8_hh_glm_ALL)),
+                          var.order = "alphabetical",abs = TRUE, line = F, thresholds = c(m = .25), var.names = v_hh,  
+                          sample.names = c("Unmatched", "NN PSM","NN PSM, caliper w/o replacement (75%)","NN PSM, caliper with replacement", "NN mahalanobis w/o replacement", "NN mahalanobis with replacement",
+                                           "Genetic mahalanobis", "Genetic PSM (100%)","Optimal mahalanobis" , "Optimal PSM", "Full mahalanobis", "Full PSM"),
+                          limits = c(0, 1.0), theme (legend.position = c(-1, 1), legend.box.background = element_rect(), legend.box.margin = margin(1, 1, 1, 1), text = 12)
+)
+
+
+Love_plot_hh
+
+#save
+final_data_MINS_HDDS_ASSET=match.data(m.out.2_hh_ALL)
+
+#make post-match boxplot of covariate spread to compare with pre-match
+par(mfrow=c(4,3), cex = 0.5)
+post_match_boxplot_hh <- for (i in 1:length(hh_COVAR_full)) {
+  form <- as.formula(paste(c("final_data_MINS_HDDS_ASSET$", hh_COVAR_full[i],"~ final_data_MINS_HDDS_ASSET$type"), collapse=""))
+  ttest <- round(t.test(form)$estimate,1)
+  boxplot(form,data=final_data_MINS_HDDS_ASSET,col=c("grey","darkgreen"),xlab=hh_COVAR_full[i],ylab = "", cex.lab=2, cex.axis=2, notch=TRUE, outline=FALSE, horizontal = TRUE) }
+
+#Save data from matching
+write.csv(final_data_MINS_HDDS_ASSET,file="final_data_gen_MINS_HDDS_ASSET.csv")
+```
+# STEP 16: test sensitivity of household matching 
+
+```{r STEP 16}
+sensemakr_hh_data <- final_data_MINS_HDDS_ASSET
+sensemakr_hh_data$type <- as.numeric(sensemakr_hh_data$type)
+
+#make models
+mod_hh_mins = lm(MINS_change~type+Elevation+Precipitation+Access+Population+Slope+Temperature+Agriculture+Agri_suitability+Ethnicity1,data = sensemakr_hh_data)
+
+mod_hh_hdds = lm(HDDS_change~type+Elevation+Precipitation+Access+Population+Slope+Temperature+Agriculture+Agri_suitability+Ethnicity1,data = sensemakr_hh_data)
+
+mod_hh_asset = lm(asset_change~type+Elevation+Precipitation+Access+Population+Slope+Temperature+Agriculture+Agri_suitability+Ethnicity1,data = sensemakr_hh_data)
+
+mins_hh_sensmakr <- sensemakr(model = mod_hh_mins, 
+                              treatment = "type",
+                              benchmark_covariates = "Agri_suitability",
+                              kd = 1:9,
+                              ky = 1:9, 
+                              q = 1,
+                              alpha = 0.05, 
+                              reduce = T)
+
+summary(mins_hh_sensmakr)
+#report_mins_hh_sensmakr <- ovb_minimal_reporting(mins_hh_sensmakr, format = "pure_html")
+#write(report_mins_hh_sensmakr, file = "report_mins_hh_sensmakr.html")
+
+hdds_hh_sensmakr <- sensemakr(model = mod_hh_hdds, 
+                              treatment = "type",
+                              benchmark_covariates = "Agri_suitability",
+                              kd = 1:9,
+                              ky = 1:9, 
+                              q = 1,
+                              alpha = 0.05, 
+                              reduce = T)
+summary(hdds_hh_sensmakr)
+#report_hdds_hh_sensmakr <- ovb_minimal_reporting(hdds_hh_sensmakr, format = "pure_html")
+#write(report_hdds_hh_sensmakr, file = "report_hdds_hh_sensmakr.html")
+
+asset_hh_sensmakr <- sensemakr(model = mod_hh_asset, 
+                               treatment = "type",
+                               benchmark_covariates = "Agri_suitability",
+                               kd = 1:9,
+                               ky = 1:9, 
+                               q = 1,
+                               alpha = 0.05, 
+                               reduce = T)
+
+summary(asset_hh_sensmakr)
+#report_asset_hh_sensmakr <- ovb_minimal_reporting(asset_hh_sensmakr, format = "pure_html")
+#write(report_asset_hh_sensmakr, file = "report_asset_hh_sensmakr.html")
+```
+
+# STEP 17: test outputs for household matching
+
+```{r STEP 17}
+hh_matched_outputs <- final_data_MINS_HDDS_ASSET
+
+#set type to factor
+hh_matched_outputs$type <- as.factor(hh_matched_outputs$type)
+
+t.test(MINS_change ~ type, data = hh_matched_outputs, subset = type %in% c(0, 1)) # 1 = treatment, 0 = control
+t.test(HDDS_change ~ type, data = hh_matched_outputs, subset = type %in% c(0, 1))
+t.test(asset_change ~ type, data = hh_matched_outputs, subset = type %in% c(0, 1))
+
+#regression
+MINS_regression <- lm(MINS_change~type+Elevation+Precipitation+Access+Population+Slope+Temperature+Agriculture+Agri_suitability+Ethnicity1,data = hh_matched_outputs)
+summary(MINS_regression)
+ATE_MINS <- avg_comparisons(MINS_regression,
+                variables = "type",
+                vcov = ~subclass,
+                newdata = subset(type == 1))
+ATE_MINS
+
+Forest_S_regression <- lm(Forest_change~type+Elevation + Precipitation + Access + Forest + Population + Slope + Temperature + Agriculture + Agri_suitability + Ethnicity1 + Grassland + Land + Ecoregion, weights = final_data_S$weights , data = final_data_S)
+summary(Forest_S_regression)
+ATE_forest_S <- avg_comparisons(Forest_S_regression,
+                variables = "type",
+                vcov = ~subclass, 
+                weights = final_data_S$weights)
+ATE_forest_S
+
+
+
+HDDS_regression <- lm(HDDS_change~type+Elevation+Precipitation+Access+Population+Slope+Temperature+Agriculture+Agri_suitability+Ethnicity1,data = hh_matched_outputs)
+summary(HDDS_regression)
+ATE_HDDS <-avg_comparisons(HDDS_regression,
+                variables = "type",
+                vcov = ~subclass,
+                newdata = subset(type == 1))
+ATE_HDDS
+
+
+Asset_regression <- lm(asset_change~type+Elevation+Precipitation+Access+Population+Slope+Temperature+Agriculture+Agri_suitability+Ethnicity1,data = hh_matched_outputs)
+summary(Asset_regression)
+ATE_Asset <- avg_comparisons(Asset_regression,
+                variables = "type",
+                vcov = ~subclass,
+                newdata = subset(type == 1))
+ATE_Asset
+
+
+ATE_all_hh <- bind_rows(ATE_MINS, ATE_HDDS, ATE_Asset)
+ATE_all_hh <- ATE_all_hh %>%
+  mutate(Outcome = c("MAHFP", "HDDS", "Asset")[1:n()])
+
+
+# Add significance indicator
+ATE_all_hh <- ATE_all_hh %>%
+  mutate(Significance = ifelse(p.value <= 0.05, "p ≤ 0.05", "p > 0.05"))
+
+# Plot all comparisons in one figure
+ggplot(ATE_all_hh, aes(x = estimate, y = Outcome, xmin = conf.low, xmax = conf.high, color = Significance)) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black") +  # Zero reference line
+  geom_point(size = 3) +  # Effect size points
+  geom_errorbarh(height = 0.2) +  # Horizontal confidence intervals
+  scale_color_manual(values = c("p ≤ 0.05" = "red", "p > 0.05" = "blue")) +  # Custom colors
+  theme_minimal() +
+  labs(title = "Average Treatment Effects for Different Outcomes",
+       x = "Estimated Effect (with 95% CI)",
+       y = "Outcome Variable",
+       color = "Significance") +
+  theme(legend.position = "bottom")
+```
+
+# STEP 18: plot household outputs
+
+```{r STEP 18}
+
+#Calculating averages
+confidenceMINS <- summarySE(hh_matched_outputs, measurevar = "MINS_change", groupvars = c("type"))
+confidenceHDDS <-  summarySE(hh_matched_outputs, measurevar = "HDDS_change", groupvars = c("type"))
+confidenceAsset <- summarySE(hh_matched_outputs, measurevar = "asset_change", groupvars = c("type"))
+
+
+#MINS
+MINS_barchart <- ggplot(confidenceMINS, aes(x=type, y=MINS_change, fill=type)) + geom_bar(stat = "identity", col = "black",width = 0.9, position = position_dodge(width = 0.1)) + theme_classic(base_size = 14) +
+  labs (x = "", y = "Months of adequate food change") + scale_x_discrete(labels = c('Control','Treatment'),position = 'bottom') + scale_fill_manual(values = c( "#E1E1E1", "#86D45F"), labels = c('Treatment', 'Control')) + 
+  scale_y_continuous(limits = c(-1.5,.5),expand = c(0,0))+
+  geom_errorbar(aes(ymin=MINS_change-ci, ymax=MINS_change+ci, width=.1)) +
+  theme(legend.position = 'none',axis.line.x = element_blank(),axis.ticks.x = element_blank(), plot.background = element_rect(fill = 'white'), panel.background = element_rect(fill = 'white'),
+        plot.margin = unit(c(.5, .5, .5, .5), "cm"),  axis.text.x = element_text(size = 14, colour = 'black')) +   geom_hline(yintercept=0)
+
+
+MINS_barchart <- MINS_barchart + 
+  geom_signif(
+    xmin = 1, xmax = 2, annotation = c("***"),
+    y_position = 0.35,
+    tip_length = 0.01,
+    vjust = 0.7)
+
+MINS_barchart
+
+
+#HDDS
+HDDS_barchart <- ggplot(confidenceHDDS, aes(x=type, y=HDDS_change, fill=type)) + geom_bar(stat = "identity", col = "black",width = 0.9, position = position_dodge(width = 0.1)) + theme_classic(base_size = 14) +
+  labs (x = "", y = "Dietary diversity change") + scale_x_discrete(labels = c('Control','Treatment'),position = 'bottom') + scale_fill_manual(values = c("#E1E1E1", "#86D45F"), labels = c('Treatment', 'Control')) + 
+  scale_y_continuous(limits = c(0,.68),expand = c(0,0))+
+  geom_errorbar(aes(ymin=HDDS_change-ci, ymax=HDDS_change+ci, width=.1)) +
+  theme(legend.position = 'none',axis.line.x = element_blank(),axis.ticks.x = element_blank(), plot.background = element_rect(fill = 'white'), panel.background = element_rect(fill = 'white'),
+        plot.margin = unit(c(.5, .5, .5, .5), "cm"),  axis.text.x = element_text(size = 14, colour = 'black')) +   geom_hline(yintercept=0)
+
+
+HDDS_barchart <- HDDS_barchart + 
+  geom_signif(
+    xmin = 1, xmax = 2, annotation = c(""),
+    y_position = 0.65,
+    tip_length = 0.01,
+    vjust = 0)
+
+HDDS_barchart
+
+
+#ASSETS
+asset_barchart <- ggplot(confidenceAsset, aes(x=type, y=asset_change, fill=type)) + geom_bar(stat = "identity", col = "black",width = 0.9, position = position_dodge(width = 0.1)) + theme_classic(base_size = 14) +
+  labs (x = "", y = "Material wellbeing change") + scale_x_discrete(labels = c('Control','Treatment'),position = 'bottom') + scale_fill_manual(values = c("#E1E1E1", "#86D45F"), labels = c('Treatment', 'Control')) + 
+  scale_y_continuous(limits = c(-1,1),expand = c(0,0))+
+  geom_errorbar(aes(ymin=asset_change-ci, ymax=asset_change+ci, width=.1)) +
+  theme(legend.position = 'none',axis.line.x = element_blank(),axis.ticks.x = element_blank(), plot.background = element_rect(fill = 'white'), panel.background = element_rect(fill = 'white'),
+        plot.margin = unit(c(.5, .5, .5, .5), "cm"),  axis.text.x = element_text(size = 14, colour = 'black')) +   geom_hline(yintercept=0)
+
+
+asset_barchart <- asset_barchart + 
+  geom_signif(
+    xmin = 1, xmax = 2, annotation = c("***"),
+    y_position = 0.92,
+    tip_length = 0.01,
+    vjust = 0)
+
+asset_barchart
+```
+
+# STEP 19: make single plot with all outputs on one page
+
+```{r STEP 19, fig.width=15, fig.height=10}
+
+all_outputs_LS_S_hh <- ggarrange(Forest_change_S_LS_barchart,Agri_change_S_LS_barchart,Grass_change_S_LS_barchart, MINS_barchart, HDDS_barchart, asset_barchart,
+                                 ncol = 3, nrow = 2)+bgcolor("white")
+all_outputs_LS_S_hh
+
+ggsave("all_outputs.png", plot = all_outputs_LS_S_hh, dpi=300, h=10, w = 15)
+```
+```{r STEP 20}
+
+avr_forest2000_S <- summarySE(final_data_S, measurevar="Forest_2000", groupvars=c("type"))
+avr_forest2000_LS <- summarySE(final_data_LS, measurevar="Forest_2000", groupvars=c("type"))
+avr_agri2000_S <- summarySE(final_data_S, measurevar="Agri_03", groupvars=c("type"))
+avr_agri2000_LS <- summarySE(final_data_LS, measurevar="Agri_03", groupvars=c("type"))
+avr_grass2000_S <- summarySE(final_data_S, measurevar="Grass_2001", groupvars=c("type"))
+avr_grass2000_LS <- summarySE(final_data_LS, measurevar="Grass_2001", groupvars=c("type"))
+avr_MINS_2011 <- summarySE(hh_matched_outputs, measurevar = "MINS_2011", groupvars = c("type"))
+avr_HDDS_2011 <-  summarySE(hh_matched_outputs, measurevar = "HDDS_2011", groupvars = c("type"))
+avr_asset_2011 <- summarySE(hh_matched_outputs, measurevar = "SES_Index_2011", groupvars = c("type"))
+```
