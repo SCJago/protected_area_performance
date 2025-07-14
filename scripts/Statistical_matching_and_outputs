@@ -721,8 +721,7 @@ bal.tab(m.out0_hh_ALL,  thresholds = c(m = .25))
 
 bal.tab(m.out.1_hh_ALL,  thresholds = c(m = .25)) 
 
-bal.tab(m.out.2_hh_ALL,  thresholds = c(m = .25)) #75% all balanced 0.11
-summary(m.out.2_hh_ALL)
+bal.tab(m.out.2_hh_ALL,  thresholds = c(m = .25)) 
 
 bal.tab(m.out.3_hh_ALL,  thresholds = c(m = .25)) 
 
