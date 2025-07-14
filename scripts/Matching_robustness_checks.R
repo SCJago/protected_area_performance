@@ -16,23 +16,8 @@ library("lmtest") #for displaying coef. table
 library("sandwich") #vcovCL
 library("marginaleffects")
 
-# Code Structure
 
-# 1) Data Construction for Matching
-# 2) Matching
-# 3) Plot Matching Results - Covariate Balance pre and post matching
-# 4) Extract Matched Pairs from matching output
-# 5) Data construction for DiD regression using matched pairs
-# 6) DiD Regression 
-# 7) Quantifying Avoided Deforestation
-# 8) Fixed Effects Panel Regression
-
-
-# --------------------- 1) Data Construction for Matching -----------------------------------------#
-
-setwd("~/Papers/Ethiopia - PA history review/Counterfactual analysis/May25_robustness_checks")
-
-#make the function
+# --------------------- 1) make the function -----------------------------------------#
 
 the_cov_parameters_loop <- function(group, output, distance, replacement, caliper_value) { 
   # Define covariates
@@ -299,7 +284,7 @@ the_hh_cov_parameters_loop <- function(group, output, distance, replacement, cal
 }  
 
 
-#----------------------------2) Robustness: addition of covariates -----------------------------------------#
+##############################################################################################################
 
 
 # 1 - Load the functions 
@@ -356,39 +341,7 @@ HOUSEHOLD$group[HOUSEHOLD$Type == 1] <- "Treat"
 HOUSEHOLD$group[HOUSEHOLD$Type == 0] <- "Cont"
 HOUSEHOLD <- na.omit(HOUSEHOLD)
 
-# 3 -  Run functions for each match group and each output
-
-
-#THE COV PARAMETERS LOOP
-
-#test strict
-the_cov_parameters_loop(
-  group = STRICT,
-  output = "Forest_change",
-  caliper_value = 0.5, 
-  replacement = TRUE, 
-  distance = "glm"
-)
-
-#test less strict
-the_cov_parameters_loop(
-  group = LESS_STRICT,
-  output = "Forest_change",
-  caliper_value = 0.5, 
-  replacement = FALSE, 
-  distance = "mahalanobis"
-)
-
-#test household
-the_hh_cov_parameters_loop(
-  group = HOUSEHOLD,
-  output = "MAHFP_change",
-  caliper_value = 1,
-  replacement = FALSE, 
-  distance = "glm"
-)
-
-# RUN LOOPS
+# 2 -----------------  Run functions for each match group and each output----------------------------------------------#
 
 #strict forest
 the_cov_parameters_loop(STRICT,
@@ -474,7 +427,8 @@ write.csv(Asset_covparam_synthesis_loop,"cov_parameter_loop_asset.csv")
 
 #check results for primary match are same as results in paper
 
-#####################################################################################
+# ---------------------------------------3. PLOT OUTPUTS ----------------------------------------------------------#
+
 ################################# schart function ##################################################
 
 schart <- function(data, labels=NA, highlight=NA, highlight2=NA, n=1, index.est=1, index.se=2, index.ci=NA,
@@ -704,7 +658,7 @@ S_forest$matched <- nrow(STRICT[STRICT$Type == 1, ])-S_forest$unmatched
 # Define the thresholds
 threshold_replacement_T <- 0.75 * nrow(STRICT[STRICT$Type == 1, ])
 
-# Create a new column more_80pc_matched in S_forest based on the appropriate threshold
+# Create a new column more_75pc_matched in S_forest based on the appropriate threshold
 S_forest$more_75pc_matched <-
   ifelse(S_forest$matched > threshold_replacement_T,T,F)
 
@@ -781,7 +735,7 @@ S_grass$matched <- nrow(STRICT[STRICT$Type == 1, ])-S_grass$unmatched
 # Define the thresholds
 threshold_replacement_T <- 0.75 * nrow(STRICT[STRICT$Type == 1, ])
 
-# Create a new column more_80pc_matched in S_grass based on the appropriate threshold
+# Create a new column more_75pc_matched in S_grass based on the appropriate threshold
 S_grass$more_75pc_matched <- 
   ifelse(S_grass$matched > threshold_replacement_T,T,F)
 
@@ -853,7 +807,7 @@ S_agri$matched <- nrow(STRICT[STRICT$Type == 1, ])-S_agri$unmatched
 # Define the thresholds
 threshold_replacement_T <- 0.75 * nrow(STRICT[STRICT$Type == 1, ])
 
-# Create a new column more_80pc_matched in S_agri based on the appropriate threshold
+# Create a new column more_75pc_matched in S_agri based on the appropriate threshold
 S_agri$more_75pc_matched <- 
   ifelse(S_agri$matched > threshold_replacement_T,T,F)
 
@@ -925,7 +879,7 @@ LS_forest$matched <- nrow(LESS_STRICT[LESS_STRICT$Type == 1,])-LS_forest$unmatch
 # Define the thresholds
 threshold_replacement_T <- .75 * nrow(LESS_STRICT[LESS_STRICT$Type == 1,])
 
-# Create a new column more_80pc_matched in LS_forest based on the appropriate threshold
+# Create a new column more_75pc_matched in LS_forest based on the appropriate threshold
 LS_forest$more_75pc_matched <- ifelse(LS_forest$matched > threshold_replacement_T,T,F)
 
 #clean dataset
@@ -998,7 +952,7 @@ LS_grass$matched <- nrow(LESS_STRICT[LESS_STRICT$Type == 1, ])-LS_grass$unmatche
 # Define the thresholds
 threshold_replacement_T <- .75 * nrow(LESS_STRICT[LESS_STRICT$Type == 1, ])
 
-# Create a new column more_80pc_matched in LS_grass based on the appropriate threshold
+# Create a new column more_75pc_matched in LS_grass based on the appropriate threshold
 LS_grass$more_75pc_matched <- 
   ifelse(LS_grass$matched > threshold_replacement_T,T,F)
 
@@ -1072,7 +1026,7 @@ LS_agri$matched <- nrow(LESS_STRICT[LESS_STRICT$Type == 1, ])-LS_agri$unmatched
 # Define the thresholds
 threshold_replacement_T <- .75 * nrow(LESS_STRICT[LESS_STRICT$Type == 1, ])
 
-# Create a new column more_80pc_matched in LS_agri based on the appropriate threshold
+# Create a new column more_75pc_matched in LS_agri based on the appropriate threshold
 LS_agri$more_75pc_matched <-
   ifelse(LS_agri$matched > threshold_replacement_T,T,F)
 
@@ -1152,7 +1106,7 @@ HH_MAHFP$matched <- nrow(HOUSEHOLD[HOUSEHOLD$Type == 1,])-HH_MAHFP$unmatched
 # Define the thresholds
 threshold_replacement_T <- 0.75 * nrow(HOUSEHOLD[HOUSEHOLD$Type == 1,])
 
-# Create a new column more_80pc_matched in HH_MAHFP based on the appropriate threshold
+# Create a new column more_75pc_matched in HH_MAHFP based on the appropriate threshold
 HH_MAHFP$more_75pc_matched <- 
   ifelse(HH_MAHFP$matched > threshold_replacement_T,T,F)
 
@@ -1231,7 +1185,7 @@ HH_HDDS$matched <- nrow(HOUSEHOLD[HOUSEHOLD$Type == 1, ])-HH_HDDS$unmatched
 threshold_replacement_T <- .75* nrow(HOUSEHOLD[HOUSEHOLD$Type == 1, ])
 
 
-# Create a new column more_80pc_matched in HH_HDDS based on the appropriate threshold
+# Create a new column more_75pc_matched in HH_HDDS based on the appropriate threshold
 HH_HDDS$more_75pc_matched <-  ifelse(HH_HDDS$matched > threshold_replacement_T,T,F)
 
 
@@ -1303,7 +1257,7 @@ HH_asset$matched <- nrow(HOUSEHOLD[HOUSEHOLD$Type == 1, ])-HH_asset$unmatched
 threshold_replacement_T <- .75 * nrow(HOUSEHOLD[HOUSEHOLD$Type == 1, ])
 
 
-# Create a new column more_80pc_matched in HH_asset based on the appropriate threshold
+# Create a new column more_75pc_matched in HH_asset based on the appropriate threshold
 HH_asset$more_75pc_matched <- 
   ifelse(HH_asset$matched > threshold_replacement_T,T,F)
 
