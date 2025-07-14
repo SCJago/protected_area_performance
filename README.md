@@ -5,7 +5,6 @@ This repository contains the code, data outputs, and figures supporting the manu
 
 **_Trade-offs Between Nature and People Reveal Challenges in Translating Global Conservation Targets Into National Realities_**  
 Sophie Jago, Gebremeskel Gizaw, Bezawit Genanaw, Joe Langley, Ermias Lulekal, Joseph D. M. White, Adèle N. Rowlands, Tariku Geda., Kumara Wakjira, Fekede Regassa, Sebsebe Demissew, Wendawek Abebe, Julia P. G. Jones, Robert J. Smith, James S. Borrell
-
 **_Submitted for publication, 2025_**
 ---
 ## Summary
