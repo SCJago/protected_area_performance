@@ -139,11 +139,9 @@ bal.tab(m.out0_S,  thresholds = c(m = .25))
 
 bal.tab(m.out.1_S,  thresholds = c(m = .25))  
 
-bal.tab(m.out.2_S,  thresholds = c(m = .25)) #all balanced, 2396/2853 treated 84%, least ppt -0.17
-summary(m.out.2_S)
+bal.tab(m.out.2_S,  thresholds = c(m = .25))
 
-bal.tab(m.out.3_S,  thresholds = c(m = .25)) #all balanced, 2639/2853 treated 93%, but 1024 (ESS) control, least ppt -0.16
-summary(m.out.3_S)
+bal.tab(m.out.3_S,  thresholds = c(m = .25)) 
 
 bal.tab(m.out.4_S,  thresholds = c(m = .25)) 
 
@@ -212,8 +210,6 @@ grass_S_sensmakr <- sensemakr(model = mod_S_grass,
                                reduce = T)
 
 summary(grass_S_sensmakr)
-#report_grass_S_sensemakr <- ovb_minimal_reporting(grass_S_sensmakr, format = "pure_html")
-#write(report_grass_S_sensemakr, file = "report_grass_S_sensemakr.html")
 
 
 agri_S_sensmakr <- sensemakr(model = mod_S_agri, 
@@ -226,8 +222,6 @@ agri_S_sensmakr <- sensemakr(model = mod_S_agri,
                               reduce = T)
 
 summary(agri_S_sensmakr)
-#report_agri_S_sensemakr <- ovb_minimal_reporting(agri_S_sensmakr, format = "pure_html")
-#write(report_agri_S_sensemakr, file = "report_agri_S_sensemakr.html")
 
 
 forest_S_sensmakr <- sensemakr(model = mod_S_forest, 
@@ -240,8 +234,6 @@ forest_S_sensmakr <- sensemakr(model = mod_S_forest,
                                 reduce = T)
 
 summary(forest_S_sensmakr)
-#report_forest_S_sensemakr <- ovb_minimal_reporting(forest_S_sensmakr, format = "pure_html")
-#write(report_forest_S_sensemakr, file = "report_forest_S_sensemakr.html")
 ```
 
 
@@ -304,18 +296,15 @@ m.out.5_LS <- matchit(as.formula(paste0("type~", paste0(COVAR_full, collapse='+'
 #check results
 bal.tab(m.out0_LS,  thresholds = c(m = .25))
 
-bal.tab(m.out.1_LS,  thresholds = c(m = .25))  #all balanced, max diff = 0.14, 4454/4557 (98%) treated
-summary(m.out.1_LS)
+bal.tab(m.out.1_LS,  thresholds = c(m = .25))  
  
-bal.tab(m.out.2_LS,  thresholds = c(m = .25)) #all balanced, max diff 0.11, 4236/4557 (93%) treated
-summary(m.out.2_LS)
+bal.tab(m.out.2_LS,  thresholds = c(m = .25)) 
 
-bal.tab(m.out.3_LS,  thresholds = c(m = .25)) #all balanced, max diff 0.12, 4398/4557 (97%) treated, but only 2656 (ESS) control
+bal.tab(m.out.3_LS,  thresholds = c(m = .25))
 
-bal.tab(m.out.4_LS,  thresholds = c(m = .25)) #all balanced, max diff 0.13, 4454/4557 (98%) treated
-summary(m.out.4_LS)
+bal.tab(m.out.4_LS,  thresholds = c(m = .25)) 
 
-bal.tab(m.out.5_LS,  thresholds = c(m = .25)) #all balanced, max diff 0.07, 4557/4557 (99.9%) treated, but only 638 (ESS) control 
+bal.tab(m.out.5_LS,  thresholds = c(m = .25)) 
 
 #Plotting mean SD - can visualise covariate balance of each
 par(mfrow = c(1,1))
@@ -378,8 +367,6 @@ grass_LS_sensmakr <- sensemakr(model = mod_LS_grass,
                                reduce = T)
 
 summary(grass_LS_sensmakr)
-#report_grass_LS_sensemakr <- ovb_minimal_reporting(grass_LS_sensmakr, format = "pure_html")
-#write(report_grass_LS_sensemakr, file = "report_grass_LS_sensemakr.html")
 
 
 agri_LS_sensmakr <- sensemakr(model = mod_LS_agri, 
@@ -392,9 +379,6 @@ agri_LS_sensmakr <- sensemakr(model = mod_LS_agri,
                               reduce = T)
 
 summary(agri_LS_sensmakr)
-#report_agri_LS_sensemakr <- ovb_minimal_reporting(agri_LS_sensmakr, format = "pure_html")
-#write(report_agri_LS_sensemakr, file = "report_agri_LS_sensemakr.html")
-
 
 forest_LS_sensmakr <- sensemakr(model = mod_LS_forest, 
                                 treatment = "type",
@@ -406,8 +390,6 @@ forest_LS_sensmakr <- sensemakr(model = mod_LS_forest,
                                 reduce = T)
 
 summary(forest_LS_sensmakr)
-#report_forest_LS_sensemakr <- ovb_minimal_reporting(forest_LS_sensmakr, format = "pure_html")
-#write(report_forest_LS_sensemakr, file = "report_forest_LS_sensemakr.html")
 
 ```
 
@@ -689,21 +671,6 @@ household_sample_clean <- household_sample_clean[is.na(household_sample_clean$Ea
 household_sample_ALL <- household_sample_clean[household_sample_clean$Temperature >= 1000, ]
 write.csv(household_sample_ALL, "household_sample.csv")
 
-# Loop through each covariate and plot the histogram
-#par(mfrow = c(4, 4))  # Set plotting area for 9 plots (adjust if needed)
-#for (cov in hh_COVAR_full) {
-#  hist(household_sample_ALL[[cov]], main = paste("Histogram of", cov), xlab = cov)
-#}
-
-
-#household_sample_ALL$Log_Population <- log(household_sample_ALL$Population)
-#household_sample_ALL$Log_Access <- log(household_sample_ALL$Access)
-#household_sample_ALL$Log_Ethnicity1 <- log(household_sample_ALL$Ethnicity1+1)
-#household_sample_ALL$Sqrt_Agriculture<- sqrt(household_sample_ALL$Agriculture)
-#summary(household_sample_ALL$Log_Access)
-#summary(household_sample_ALL$Log_Population)
-#summary(household_sample_ALL$Sqrt_Agriculture)
-#summary(household_sample_ALL$Log_Ethnicity1)
 
 #Subset continuous co-variates 
 #hh_COVAR_full_logged <- c("Elevation", "Precipitation", "Access", "Population", "Slope", "Temperature", "Agriculture","Agri_suitability", "Ethnicity1")
@@ -718,11 +685,6 @@ pre_match_boxplot_hh_outputs <- for (i in 1:length(hh_COVAR_full)) {
 
 #Null match 
 m.out0_hh_ALL <- matchit(as.formula(paste0("type~",paste0(hh_COVAR_full, collapse='+'))),data = household_sample_ALL,  method = NULL, distance = "glm")
-
-#Add categorical variables 
-household_sample_ALL$Land <- as.factor(household_sample_ALL$Land)
-household_sample_ALL$Ecoregion <- as.factor(household_sample_ALL$Ecoregion)
-COVAR.ex_hh <- c( "Ecoregion") #name categorical variable
 
 # Nearest neighbour match for continuous covariates and exact match for categorical 
 m.out.1_hh_ALL <- matchit(as.formula(paste0("type~", paste0(hh_COVAR_full, collapse='+'))), data = household_sample_ALL, method = "nearest", distance = "glm")
@@ -749,29 +711,6 @@ m.out.4_hh_ALL <- matchit(as.formula(paste0("type~", paste0(hh_COVAR_full, colla
 m.out.5_hh_ALL <- matchit(as.formula(paste0("type~", paste0(hh_COVAR_full, collapse='+'))),
                          method = "nearest", distance = "mahalanobis",data = household_sample_ALL, replace = TRUE)
 
-#Match 6: matching with genetic mahalanobis
-m.out.6_hh_ALL <- matchit(as.formula(paste0("type~", paste0(hh_COVAR_full, collapse='+'))),
-                         method = "genetic", distance = "mahalanobis", pop.size = 200, data = household_sample_ALL, replace = FALSE)
-
-#Match 6: matching with genetic glm
-m.out.6_hh_glm_ALL <- matchit(as.formula(paste0("type~", paste0(hh_COVAR_full, collapse='+'))),
-                             method = "genetic", distance = "glm", pop.size = 200, data = household_sample_ALL, replace = FALSE)
-
-#Match 7: matching with optimal mahalanobis
-m.out.7_hh_ALL <- matchit(as.formula(paste0("type~", paste0(hh_COVAR_full, collapse='+'))),
-                         method = "optimal", distance = "mahalanobis", data = household_sample_ALL, replace = FALSE)
-
-#Match 7: matching with optimal glm
-m.out.7_hh_glm_ALL <- matchit(as.formula(paste0("type~", paste0(hh_COVAR_full, collapse='+'))),
-                          method = "optimal", distance = "glm", data = household_sample_ALL, replace = FALSE)
-
-#Match 8: matching with full mahalanobis
-m.out.8_hh_ALL <- matchit(as.formula(paste0("type~", paste0(hh_COVAR_full, collapse='+'))),
-                         method = "full", distance = "mahalanobis", data = household_sample_ALL, replace = FALSE)
-
-#Match 8: matching with full glm
-m.out.8_hh_glm_ALL <- matchit(as.formula(paste0("type~", paste0(hh_COVAR_full, collapse='+'))),
-                          method = "full", distance = "glm", data = household_sample_ALL, replace = FALSE)
 ```
 
 # STEP 15: check balance and no treated units for household matching 
@@ -791,25 +730,11 @@ bal.tab(m.out.4_hh_ALL,  thresholds = c(m = .25))
 
 bal.tab(m.out.5_hh_ALL,  thresholds = c(m = .25)) 
 
-bal.tab(m.out.6_hh_ALL,  thresholds = c(m = .25))
-
-bal.tab(m.out.6_hh_glm_ALL,  thresholds = c(m = .25)) 
-
-bal.tab(m.out.7_hh_ALL,  thresholds = c(m = .25)) 
-
-bal.tab(m.out.7_hh_glm_ALL,  thresholds = c(m = .25))
-
-bal.tab(m.out.8_hh_ALL,  thresholds = c(m = .25))
-
-bal.tab(m.out.8_hh_glm_ALL,  thresholds = c(m = .25))
- 
 #Plotting mean SD
 par(mfrow = c(1,1))
 
 plot(summary(m.out.2_hh_ALL, subclass = TRUE),
      var.order = "unmatched", abs = FALSE, threshold=0.25)
-
-
 
 #Love plot to view all matching options tested
 
@@ -840,6 +765,7 @@ post_match_boxplot_hh <- for (i in 1:length(hh_COVAR_full)) {
 
 #Save data from matching
 write.csv(final_data_MINS_HDDS_ASSET,file="final_data_gen_MINS_HDDS_ASSET.csv")
+
 ```
 # STEP 16: test sensitivity of household matching 
 
@@ -864,8 +790,6 @@ mins_hh_sensmakr <- sensemakr(model = mod_hh_mins,
                               reduce = T)
 
 summary(mins_hh_sensmakr)
-#report_mins_hh_sensmakr <- ovb_minimal_reporting(mins_hh_sensmakr, format = "pure_html")
-#write(report_mins_hh_sensmakr, file = "report_mins_hh_sensmakr.html")
 
 hdds_hh_sensmakr <- sensemakr(model = mod_hh_hdds, 
                               treatment = "type",
@@ -876,8 +800,7 @@ hdds_hh_sensmakr <- sensemakr(model = mod_hh_hdds,
                               alpha = 0.05, 
                               reduce = T)
 summary(hdds_hh_sensmakr)
-#report_hdds_hh_sensmakr <- ovb_minimal_reporting(hdds_hh_sensmakr, format = "pure_html")
-#write(report_hdds_hh_sensmakr, file = "report_hdds_hh_sensmakr.html")
+
 
 asset_hh_sensmakr <- sensemakr(model = mod_hh_asset, 
                                treatment = "type",
@@ -889,8 +812,6 @@ asset_hh_sensmakr <- sensemakr(model = mod_hh_asset,
                                reduce = T)
 
 summary(asset_hh_sensmakr)
-#report_asset_hh_sensmakr <- ovb_minimal_reporting(asset_hh_sensmakr, format = "pure_html")
-#write(report_asset_hh_sensmakr, file = "report_asset_hh_sensmakr.html")
 ```
 
 # STEP 17: test outputs for household matching
@@ -1041,16 +962,4 @@ all_outputs_LS_S_hh <- ggarrange(Forest_change_S_LS_barchart,Agri_change_S_LS_ba
 all_outputs_LS_S_hh
 
 ggsave("all_outputs.png", plot = all_outputs_LS_S_hh, dpi=300, h=10, w = 15)
-```
-```{r STEP 20}
-
-avr_forest2000_S <- summarySE(final_data_S, measurevar="Forest_2000", groupvars=c("type"))
-avr_forest2000_LS <- summarySE(final_data_LS, measurevar="Forest_2000", groupvars=c("type"))
-avr_agri2000_S <- summarySE(final_data_S, measurevar="Agri_03", groupvars=c("type"))
-avr_agri2000_LS <- summarySE(final_data_LS, measurevar="Agri_03", groupvars=c("type"))
-avr_grass2000_S <- summarySE(final_data_S, measurevar="Grass_2001", groupvars=c("type"))
-avr_grass2000_LS <- summarySE(final_data_LS, measurevar="Grass_2001", groupvars=c("type"))
-avr_MINS_2011 <- summarySE(hh_matched_outputs, measurevar = "MINS_2011", groupvars = c("type"))
-avr_HDDS_2011 <-  summarySE(hh_matched_outputs, measurevar = "HDDS_2011", groupvars = c("type"))
-avr_asset_2011 <- summarySE(hh_matched_outputs, measurevar = "SES_Index_2011", groupvars = c("type"))
 ```
