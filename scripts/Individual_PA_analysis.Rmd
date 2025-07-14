@@ -1,5 +1,5 @@
 ---
-title: "Full_LMW_april25"
+title: "Individual_PA_analysis"
 author: "Sophie Jago"
 date: "2025-04-15"
 output: html_document
@@ -12,8 +12,6 @@ knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
 # SET UP
 
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
-
-setwd("~/Papers/Ethiopia - PA history review/Counterfactual analysis/LMW_April25")
 
 #open libraries
 library("lmw")
@@ -720,7 +718,6 @@ budget_dat2$Budget_dollar <- budget_dat2$Avr_budg_scale_2014_infla_USD
 #Bring in area data
 PA_area <- read.csv("Updated_PA_area_Dec24.csv")
 budget_dat2 <- full_join(budget_dat2, PA_area, by = "Name_PAs")
-budget_dat2$budget_scaled_area <- budget_dat2$Budget_dollar/((budget_dat2$AREA_km2))
 budget_dat2 <- na.omit(budget_dat2)
 
 cor(budget_dat2$Avr_budg_scale_2014_infla_USD, budget_dat2$AREA_km2)
@@ -781,38 +778,6 @@ budget_box <- ggplot(budget_dat2, aes(x = performance, y = Avr_budg_scale_2014_i
   coord_flip()
 
 budget_box
-
-budget_summary <- budget_dat2 %>%
-  group_by(performance) %>%
-  summarise(
-    mean_budget = mean(Avr_budg_scale_2014_infla_USD / 1000, na.rm = TRUE),
-    n = n(),
-    sd = sd(Avr_budg_scale_2014_infla_USD / 1000, na.rm = TRUE),
-    se = sd / sqrt(n),
-    ci = 1.96 * se
-  )
-
-
-budget_bar_ci <- ggplot(budget_summary, aes(x = reorder(performance, mean_budget), y = mean_budget, fill = performance)) +
-  geom_bar(stat = "identity", width = 0.6, color = "black") +
-  geom_errorbar(aes(ymin = mean_budget - se, ymax = mean_budget + se), width = 0.2, linewidth = 0.3) +
-  labs(x = "Performance", y = "Average annual budget ('000 USD)") +
-  scale_fill_manual(values = c("Lose-lose" = "#808080", 
-                               "Wellbeing win" = "#CC79A7",
-                               "Environment win" = "#009E73", 
-                               "Win-win" = "#E69F00")) +
-  scale_y_continuous(limits = c(0, NA), expand = c(0, 0)) +
-  theme_classic(base_size = 8) +
-  theme(
-    legend.position = "none",
-    axis.text = element_text(colour = "black", size = 7),
-    axis.title.y = element_blank(),
-    panel.background = element_rect(fill = "transparent", color = NA),
-    plot.background = element_rect(fill = "white", color = NA)
-  ) +
-  coord_flip()  # Horizontal bars for readability
-
-budget_bar_ci
 
 ggsave("Budget_boxplot_15May25.png", budget_box, height = 6, width = 7.5, units = "cm", dpi = 300)
 
@@ -900,7 +865,6 @@ anova.cca(rda.partial, step = 1000)  # Test AREA_km2 conditional effect
 rda.pov2 <- rda(pov_dat$MAHFP_ATE + pov_dat$HDDS_ATE + pov_dat$asset_ATE ~ pov_dat$Avr_budg_scale_2014_infla_USD, data = pov_dat, scale=F)
 set.seed(200)  # Set the seed for reproducibility
 anova.cca(rda.pov2, step = 1000, by="term")
-
 
 #adding area doesn't significantly improve model fit
 rda.partial_pov <- rda(pov_dat$MAHFP_ATE + pov_dat$HDDS_ATE + pov_dat$asset_ATE ~ pov_dat$Avr_budg_scale_2014_infla_USD + Condition(pov_dat$AREA_km2), data = pov_dat, scale = FALSE)
