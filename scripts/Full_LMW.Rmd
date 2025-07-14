@@ -1,0 +1,909 @@
+---
+title: "Full_LMW_april25"
+author: "Sophie Jago"
+date: "2025-04-15"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+```
+
+# SET UP
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+
+setwd("~/Papers/Ethiopia - PA history review/Counterfactual analysis/LMW_April25")
+
+#open libraries
+library("lmw")
+library("dplyr")
+library("tidyr")
+library("ggplot2")
+library("sjPlot")
+library("dunn.test")
+library("ggsignif")
+library("vegan")
+
+```
+
+# STEP 1: BRING IN MATCHED DATA
+
+```{r STEP 1}
+#read csvs
+LS_matchit <- read.csv("LS_match_mout4.csv")
+S_matchit <- read.csv("S_match_mout3.csv")
+hh_matchit <- read.csv("final_data_gen_MINS_HDDS_ASSET.csv")
+
+#check type is factor
+LS_matchit$type <- as.factor(LS_matchit$type)
+S_matchit$type <- as.factor(S_matchit$type)
+hh_matchit$type <- as.factor(hh_matchit$type)
+LS_matchit$Land <- as.factor(LS_matchit$Land)
+S_matchit$Land <- as.factor(S_matchit$Land)
+LS_matchit$Ecoregion <- as.factor(LS_matchit$Ecoregion)
+S_matchit$Ecoregion <- as.factor(S_matchit$Ecoregion)
+
+
+#check numbers of treatment cells
+table(LS_matchit$Name_PAs)
+table(S_matchit$Name_PAs)
+table(hh_matchit$Name_PAs)
+```
+
+# STEP 2: GET UNIQUE PA DATAFRAMES FOR LESS STRICT PAS
+
+```{r STEP 2}
+# Subset dataframe by Name_PAs
+unique_names_LS <- unique(LS_matchit$Name_PAs)
+
+# Create a list of dataframes, one for each unique Name_PAs
+PA_list_LS <- split(LS_matchit, LS_matchit$Name_PAs)
+
+# Get rows where Name_PAs is NA (control cells)
+control_cells_LS <- LS_matchit[is.na(LS_matchit$Name_PAs), ]
+control_cells_LS <- control_cells_LS[control_cells_LS$type == 0,]
+
+# Loop through the unique names and assign each dataframe to a new variable in the environment
+for(name in unique_names_LS) {
+  # Clean the name to make it a valid R variable name (optional)
+  valid_name_LS <- make.names(name, unique = TRUE)
+  
+  # Combine the dataframe for the specific Name_PAs with the control cells
+  df_with_controls_LS <- rbind(PA_list_LS[[name]], control_cells_LS)
+  
+  # Dynamically assign each dataframe to a new variable named after the unique Name_PAs
+  assign(valid_name_LS, df_with_controls_LS)
+}
+```
+
+# STEP 3: GET UNIQUE PA DATAFRAMES FOR STRICT PAS
+
+```{r STEP 3}
+# Subset strict dataframe by Name_PAs
+unique_names_S <- unique(S_matchit$Name_PAs)
+
+# Create a list of dataframes, one for each unique Name_PAs
+PA_list_S <- split(S_matchit, S_matchit$Name_PAs)
+
+# Get rows where Name_PAs is NA (control cells)
+control_cells_S <- S_matchit[is.na(S_matchit$Name_PAs), ]
+
+# Loop through the unique names and assign each dataframe to a new variable in the environment
+for(name in unique_names_S) {
+  # Clean the name to make it a valid R variable name (optional)
+  valid_name_S <- make.names(name, unique = TRUE)
+  
+  # Combine the dataframe for the specific Name_PAs with the control cells
+  df_with_controls_S <- rbind(PA_list_S[[name]], control_cells_S)
+  
+  # Dynamically assign each dataframe to a new variable named after the unique Name_PAs
+  assign(valid_name_S, df_with_controls_S)
+}
+```
+
+# STEP 4: LOOP THROUGH LMW ALL LESS STRICT PAs
+
+```{r STEP 4}
+# Filter out NA values from unique_names_LS
+filtered_names_LS <- unique_names_LS[!is.na(unique_names_LS)]
+
+# Create valid R variable names from the filtered list
+valid_names_LS <- make.names(filtered_names_LS, unique = TRUE)
+
+
+# Create an empty list to store results
+results_list_LS <- list()
+
+# Loop through each valid name and perform the operations
+for (name in valid_names_LS) {
+  
+  # Retrieve the dataframe using get() function
+  df <- get(name)
+  
+  # Estimate the weights using "lmw"
+  lmw.out <- lmw(~ type + Elevation + Precipitation + Access + 
+                 Forest + Population + Slope + Temperature + 
+                 Agriculture + Agri_suitability + Ethnicity1 + 
+                 Grassland + Land + Ecoregion,
+                 data = df, treat = "type",
+                 estimand = "ATE", method = "URI")
+  
+  s <- summary(lmw.out)
+  
+  # Check balance (SMD should be 0 for all covariates)
+  balance_values <- as.data.frame(s$bal.weighted)
+  SMD <- subset(balance_values, select = c("SMD"))
+  SMD[] <- lapply(SMD, function(x) round(x, 2))
+  balance_status <- ifelse(all(SMD == 0), "Yes", "No")
+  
+  #get sample sizes
+  n <- as.data.frame(s$nn)
+  n_weight <- n["Weighted", ]
+  n_unweight <- n["All", ]
+  n_treat <- subset(n_weight, select = c("Treated"))
+  n_unweighted <- subset(n_unweight, select = c("Treated"))
+  
+  # Initialize a list to store output for this Name_PAs
+  temp_results <- list()
+  
+  # 1. Forest_change outcome
+  if ("Forest_change" %in% names(df)) {
+    w <- lmw.out$weights
+    forest_diff <- with(df, 
+                        weighted.mean(Forest_change[type == 1], w[type == 1]) - 
+                          weighted.mean(Forest_change[type == 0], w[type == 0]))
+
+    # Fit model for Forest_change
+    lmw.fit_forest <- lmw_est(lmw.out, outcome = "Forest_change")
+    fit_summary_forest <- summary(lmw.fit_forest)
+
+    
+    # Ensure fit_summary_forest has coefficients before extracting
+    if (!is.null(fit_summary_forest$coefficients) && ncol(fit_summary_forest$coefficients) > 1) {
+      # Extract relevant information
+      temp_results[["Forest_change"]] <- data.frame(
+        Name_PAs = name,
+        Output = "Forest_change",
+        ATE = forest_diff,
+        Estimate = fit_summary_forest$coefficients[, "Estimate"],
+        Std.Error = fit_summary_forest$coefficients[, "Std. Error"],
+        CI_Lower = fit_summary_forest$coefficients[, "95% CI L"],
+        CI_Upper = fit_summary_forest$coefficients[, "95% CI U"],
+        t_value = fit_summary_forest$coefficients[, "t value"],
+        p_value = fit_summary_forest$coefficients[, "Pr(>|t|)"],
+        Balance = balance_status,  # Add balance column
+        n_weight_t = n_treat,
+        n_unweight = n_unweighted,
+        stringsAsFactors = FALSE
+      )
+    }
+  }
+  
+  # 2. Percent_grass_change outcome
+  if ("Percent_grass_change" %in% names(df)) {
+    w <- lmw.out$weights
+    grass_diff <- with(df, 
+                       weighted.mean(Percent_grass_change[type == 1], w[type == 1]) - 
+                         weighted.mean(Percent_grass_change[type == 0], w[type == 0]))
+    
+    # Fit model for Percent_grass_change
+    lmw.fit_grass <- lmw_est(lmw.out, outcome = "Percent_grass_change")
+    fit_summary_grass <- summary(lmw.fit_grass)
+    
+    # Ensure fit_summary_grass has coefficients before extracting
+    if (!is.null(fit_summary_grass$coefficients) && ncol(fit_summary_grass$coefficients) > 1) {
+      temp_results[["Percent_grass_change"]] <- data.frame(
+        Name_PAs = name,
+        Output = "Percent_grass_change",
+        ATE = grass_diff,
+        Estimate = fit_summary_grass$coefficients[, "Estimate"],
+        Std.Error = fit_summary_grass$coefficients[, "Std. Error"],
+        CI_Lower = fit_summary_grass$coefficients[, "95% CI L"],
+        CI_Upper = fit_summary_grass$coefficients[, "95% CI U"],
+        t_value = fit_summary_grass$coefficients[, "t value"],
+        p_value = fit_summary_grass$coefficients[, "Pr(>|t|)"],
+        Balance = balance_status,  # Add balance column
+        n_weight_t = n_treat,
+        n_unweight = n_unweighted,
+        stringsAsFactors = FALSE
+      )
+    }
+  }
+  
+  # 3. Percent_agriculturechange outcome
+  if ("Percent_agriculturechange" %in% names(df)) {
+    w <- lmw.out$weights
+    agri_diff <- with(df, 
+                      weighted.mean(Percent_agriculturechange[type == 1], w[type == 1]) - 
+                        weighted.mean(Percent_agriculturechange[type == 0], w[type == 0]))
+    
+    # Fit model for Percent_agriculturechange
+    lmw.fit_agri <- lmw_est(lmw.out, outcome = "Percent_agriculturechange")
+    fit_summary_agri <- summary(lmw.fit_agri)
+    
+    # Ensure fit_summary_agri has coefficients before extracting
+    if (!is.null(fit_summary_agri$coefficients) && ncol(fit_summary_agri$coefficients) > 1) {
+      temp_results[["Percent_agriculturechange"]] <- data.frame(
+        Name_PAs = name,
+        Output = "Percent_agriculturechange",
+        ATE = agri_diff,
+        Estimate = fit_summary_agri$coefficients[, "Estimate"],
+        Std.Error = fit_summary_agri$coefficients[, "Std. Error"],
+        CI_Lower = fit_summary_agri$coefficients[, "95% CI L"],
+        CI_Upper = fit_summary_agri$coefficients[, "95% CI U"],
+        t_value = fit_summary_agri$coefficients[, "t value"],
+        p_value = fit_summary_agri$coefficients[, "Pr(>|t|)"],
+        Balance = balance_status,  # Add balance column
+        n_weight_t = n_treat,
+        n_unweight = n_unweighted,
+        stringsAsFactors = FALSE
+      )
+    }
+  }
+  
+  # Combine results for this Name_PAs
+  results_list_LS[[name]] <- do.call(rbind, temp_results)
+}
+
+# Combine all results into a single dataframe
+final_results_LS <- do.call(rbind, results_list_LS)
+
+# Filter rows where Balance is not "No"
+final_results_LS <- final_results_LS[final_results_LS$Balance != "No", ]
+final_results_LS <- na.omit(final_results_LS)
+write.csv(final_results_LS, "final_results_LS.csv")
+
+#subset just sig ATE
+final_results_LS$sig_ATE <- ifelse(final_results_LS$p_value > 0.05, 0, final_results_LS$ATE) #change any non-sig ATEs to 0
+LS_results_subset <- subset(final_results_LS, select = c(Name_PAs, Output, sig_ATE))
+
+#change to wide dataframe
+LS_results_wide <- LS_results_subset %>%
+  group_by(Name_PAs) %>%
+  pivot_wider(names_from = Output, values_from = sig_ATE)
+names(LS_results_wide) <- c("Name_PAs", "Forest_ATE", "Grass_ATE", "Agri_ATE")
+```
+
+# STEP 5: LOOP THROUGH ALL STRICT PAs
+
+```{r STEP 5}
+# Filter out NA values from unique_names_LS
+filtered_names_S <- unique_names_S[!is.na(unique_names_S)]
+
+# Create a vector of valid names for dataframes
+valid_names_S <- make.names(filtered_names_S, unique = TRUE)
+
+# Create an empty list to store results
+results_list_S <- list()
+
+# Loop through each valid name and perform the operations
+for (name in valid_names_S) {
+  
+  # Retrieve the dataframe using get() function
+  df <- get(name)
+  
+  # Estimate the weights using "lmw"
+  lmw.out <- lmw(~ type + Elevation + Precipitation + Access + 
+                 Forest + Population + Slope + Temperature + 
+                 Agriculture + Agri_suitability + Ethnicity1 + 
+                 Grassland + Land + Ecoregion,
+                 data = df, treat = "type",
+                 estimand = "ATE", method = "URI")
+  
+  s <- summary(lmw.out)
+  
+  # Check balance (SMD should be 0 for all covariates)
+  balance_values <- as.data.frame(s$bal.weighted)
+  SMD <- subset(balance_values, select = c("SMD"))
+  SMD[] <- lapply(SMD, function(x) round(x, 2))
+  balance_status <- ifelse(all(SMD == 0), "Yes", "No")
+  n_weight <- n["Weighted", ]
+  n_unweight <- n["All", ]
+  n_treat <- subset(n_weight, select = c("Treated"))
+  n_unweighted <- subset(n_unweight, select = c("Treated"))
+  
+  # Initialize a list to store output for this Name_PAs
+  temp_results <- list()
+  
+  # 1. Forest_change outcome
+  if ("Forest_change" %in% names(df)) {
+    w <- lmw.out$weights
+    forest_diff <- with(df, 
+                        weighted.mean(Forest_change[type == 1], w[type == 1]) - 
+                          weighted.mean(Forest_change[type == 0], w[type == 0]))
+    
+    # Fit model for Forest_change
+    lmw.fit_forest <- lmw_est(lmw.out, outcome = "Forest_change")
+    fit_summary_forest <- summary(lmw.fit_forest)
+    
+    # Extract all relevant information from summary for Forest_change
+    temp_results[["Forest_change"]] <- data.frame(
+      Name_PAs = name,
+      Output = "Forest_change",
+      ATE = forest_diff,
+      Estimate = fit_summary_forest$coefficients[, "Estimate"],
+      Std.Error = fit_summary_forest$coefficients[, "Std. Error"],
+      CI_Lower = fit_summary_forest$coefficients[, "95% CI L"],
+      CI_Upper = fit_summary_forest$coefficients[, "95% CI U"],
+      t_value = fit_summary_forest$coefficients[, "t value"],
+      p_value = fit_summary_forest$coefficients[, "Pr(>|t|)"],
+      Balance = balance_status,  # Add balance column
+      n_weight_t = n_treat,
+      n_unweight = n_unweighted,
+      stringsAsFactors = FALSE
+    )
+  }
+  
+  # 2. Percent_grass_change outcome
+  if ("Percent_grass_change" %in% names(df)) {
+    w <- lmw.out$weights
+    grass_diff <- with(df, 
+                       weighted.mean(Percent_grass_change[type == 1], w[type == 1]) - 
+                         weighted.mean(Percent_grass_change[type == 0], w[type == 0]))
+    
+    # Fit model for Percent_grass_change
+    lmw.fit_grass <- lmw_est(lmw.out, outcome = "Percent_grass_change")
+    fit_summary_grass <- summary(lmw.fit_grass)
+    
+    # Extract all relevant information from summary for Percent_grass_change
+    temp_results[["Percent_grass_change"]] <- data.frame(
+      Name_PAs = name,
+      Output = "Percent_grass_change",
+      ATE = grass_diff,
+      Estimate = fit_summary_grass$coefficients[, "Estimate"],
+      Std.Error = fit_summary_grass$coefficients[, "Std. Error"],
+      CI_Lower = fit_summary_grass$coefficients[, "95% CI L"],
+      CI_Upper = fit_summary_grass$coefficients[, "95% CI U"],
+      t_value = fit_summary_grass$coefficients[, "t value"],
+      p_value = fit_summary_grass$coefficients[, "Pr(>|t|)"],
+      Balance = balance_status,  # Add balance column
+      n_weight_t = n_treat,
+      n_unweight = n_unweighted,
+      stringsAsFactors = FALSE
+    )
+  }
+  
+  # 3. Percent_agriculturechange outcome
+  if ("Percent_agriculturechange" %in% names(df)) {
+    w <- lmw.out$weights
+    agri_diff <- with(df, 
+                      weighted.mean(Percent_agriculturechange[type == 1], w[type == 1]) - 
+                        weighted.mean(Percent_agriculturechange[type == 0], w[type == 0]))
+    
+    # Fit model for Percent_agriculturechange
+    lmw.fit_agri <- lmw_est(lmw.out, outcome = "Percent_agriculturechange")
+    fit_summary_agri <- summary(lmw.fit_agri);
+    
+    # Extract all relevant information from summary for Percent_agriculturechange
+    temp_results[["Percent_agriculturechange"]] <- data.frame(
+      Name_PAs = name,
+      Output = "Percent_agriculturechange",
+      ATE = agri_diff,
+      Estimate = fit_summary_agri$coefficients[, "Estimate"],
+      Std.Error = fit_summary_agri$coefficients[, "Std. Error"],
+      CI_Lower = fit_summary_agri$coefficients[, "95% CI L"],
+      CI_Upper = fit_summary_agri$coefficients[, "95% CI U"],
+      t_value = fit_summary_agri$coefficients[, "t value"],
+      p_value = fit_summary_agri$coefficients[, "Pr(>|t|)"],
+      Balance = balance_status,  # Add balance column
+      n_weight_t = n_treat,
+      n_unweight = n_unweighted,
+      stringsAsFactors = FALSE
+    )
+  }
+  
+  # Combine results for this Name_PAs
+  results_list_S[[name]] <- do.call(rbind, temp_results)
+}
+
+# Combine all results into a single dataframe
+final_results_S <- do.call(rbind, results_list_S)
+
+# Filter rows where Balance is not "No"
+final_results_S <- final_results_S[final_results_S$Balance == "Yes",]
+final_results_S <- na.omit(final_results_S)
+write.csv(final_results_S, "final_results_S.csv")
+
+#subset just sig ATE
+final_results_S$sig_ATE <- ifelse(final_results_S$p_value > 0.05, 0, final_results_S$ATE) #change any non-sig ATEs to 0
+S_results_subset <- subset(final_results_S, select = c(Name_PAs, Output, sig_ATE))
+
+#change to wide dataframe
+S_results_wide <- S_results_subset %>%
+  group_by(Name_PAs) %>%
+  pivot_wider(names_from = Output, values_from = sig_ATE)
+names(S_results_wide) <- c("Name_PAs", "Forest_ATE", "Grass_ATE", "Agri_ATE")
+```
+
+# STEP 6: SPLIT HOUSEHOLD OUTCOME DATA INTO INDIVIDUAL PAs
+
+```{r STEP 6}
+
+# Subset dataframe by Name_PAs
+unique_names_hh <- unique(hh_matchit$Name_PAs)
+
+# Create a list of dataframes, one for each unique Name_PAs
+PA_list_hh <- split(hh_matchit, hh_matchit$Name_PAs)
+
+# Get rows where Name_PAs is NA (control celhh)
+control_cells_hh <- hh_matchit[is.na(hh_matchit$Name_PAs), ]
+
+# Loop through the unique names and assign each dataframe to a new variable in the environment
+for(name in unique_names_hh) {
+  # Clean the name to make it a valid R variable name (optional)
+  valid_name_hh <- make.names(name, unique = TRUE)
+  
+  # Combine the dataframe for the specific Name_PAs with the control cells
+  df_with_controls_hh <- rbind(PA_list_hh[[name]], control_cells_hh)
+  
+  # Dynamically assign each dataframe to a new variable named after the unique Name_PAs
+  assign(valid_name_hh, df_with_controls_hh)
+}
+
+
+# Filter out NA values from unique_names_LS
+filtered_names_hh <- unique_names_hh[!is.na(unique_names_hh)]
+
+# Create a vector of valid names for dataframes
+valid_names_hh <- make.names(filtered_names_hh, unique = TRUE)
+```
+
+# STEP 7: LOOP THROUGH HOUSEHOLD PAs
+
+```{r STEP 7}
+# Create an empty list to store results
+results_list_hh <- list()
+
+# Loop through each valid name and perform the operations
+for (name in valid_names_hh) {
+  
+  # Retrieve the dataframe using get() function
+  df <- get(name)
+  
+  # Estimate the weights using "lmw"
+  lmw.out <- lmw(~ type + Elevation + Precipitation + Access + 
+                 Population + Slope + Temperature + 
+                 Agriculture + Agri_suitability + Ethnicity1,
+                 data = df, treat = "type",
+                 estimand = "ATE", method = "URI")
+  
+  s <- summary(lmw.out)
+  
+  # Check balance (SMD should be 0 for all covariates)
+  balance_values <- as.data.frame(s$bal.weighted)
+  SMD <- subset(balance_values, select = c("SMD"))
+  SMD[] <- lapply(SMD, function(x) round(x, 2))
+  balance_status <- ifelse(all(SMD == 0), "Yes", "No")
+  n_weight <- n["Weighted", ]
+  n_unweight <- n["All", ]
+  n_treat <- subset(n_weight, select = c("Treated"))
+  n_unweighted <- subset(n_unweight, select = c("Treated"))
+  
+  # Initialize a list to store output for this Name_PAs
+  temp_results <- list()
+  
+  # 1. MINS_change outcome
+  if ("MINS_change" %in% names(df)) {
+    w <- lmw.out$weights
+    MINS_diff <- with(df, 
+                        weighted.mean(MINS_change[type == 1], w[type == 1]) - 
+                          weighted.mean(MINS_change[type == 0], w[type == 0]))
+    
+    # Fit model for Forest_change
+    lmw.fit_MINS <- lmw_est(lmw.out, outcome = "MINS_change")
+    fit_summary_MINS <- summary(lmw.fit_MINS)
+    
+    # Extract all relevant information from summary for Forest_change
+    temp_results[["MINS_change"]] <- data.frame(
+      Name_PAs = name,
+      Output = "MINS_change",
+      ATE = MINS_diff,
+      Estimate = fit_summary_MINS$coefficients[, "Estimate"],
+      Std.Error = fit_summary_MINS$coefficients[, "Std. Error"],
+      CI_Lower = fit_summary_MINS$coefficients[, "95% CI L"],
+      CI_Upper = fit_summary_MINS$coefficients[, "95% CI U"],
+      t_value = fit_summary_MINS$coefficients[, "t value"],
+      p_value = fit_summary_MINS$coefficients[, "Pr(>|t|)"],
+      Balance = balance_status,  # Add balance column
+      n_weight_t = n_treat,
+      n_unweight = n_unweighted,
+      stringsAsFactors = FALSE
+    )
+  }
+  
+  # 2. Percent__HDDS_change outcome
+  if ("HDDS_change" %in% names(df)) {
+    w <- lmw.out$weights
+    HDDS_diff <- with(df, 
+                       weighted.mean(HDDS_change[type == 1], w[type == 1]) - 
+                         weighted.mean(HDDS_change[type == 0], w[type == 0]))
+    
+    # Fit model for Percent__HDDS_change
+    lmw.fit__HDDS <- lmw_est(lmw.out, outcome = "HDDS_change")
+    fit_summary__HDDS <- summary(lmw.fit__HDDS)
+    
+    # Extract all relevant information from summary for Percent__HDDS_change
+    temp_results[["Percent__HDDS_change"]] <- data.frame(
+      Name_PAs = name,
+      Output = "Percent__HDDS_change",
+      ATE = HDDS_diff,
+      Estimate = fit_summary__HDDS$coefficients[, "Estimate"],
+      Std.Error = fit_summary__HDDS$coefficients[, "Std. Error"],
+      CI_Lower = fit_summary__HDDS$coefficients[, "95% CI L"],
+      CI_Upper = fit_summary__HDDS$coefficients[, "95% CI U"],
+      t_value = fit_summary__HDDS$coefficients[, "t value"],
+      p_value = fit_summary__HDDS$coefficients[, "Pr(>|t|)"],
+      Balance = balance_status,  # Add balance column
+      n_weight_t = n_treat,
+      n_unweight = n_unweighted,
+      stringsAsFactors = FALSE
+    )
+  }
+  
+  # 3. asset_change outcome
+  if ("asset_change" %in% names(df)) {
+    w <- lmw.out$weights
+    asset_diff <- with(df, 
+                      weighted.mean(asset_change[type == 1], w[type == 1]) - 
+                        weighted.mean(asset_change[type == 0], w[type == 0]))
+    
+    # Fit model for asset_change
+    lmw.fit_asset <- lmw_est(lmw.out, outcome = "asset_change")
+    fit_summary_asset <- summary(lmw.fit_asset);
+    
+    # Extract all relevant information from summary for asset_change
+    temp_results[["asset_change"]] <- data.frame(
+      Name_PAs = name,
+      Output = "asset_change",
+      ATE = asset_diff,
+      Estimate = fit_summary_asset$coefficients[, "Estimate"],
+      Std.Error = fit_summary_asset$coefficients[, "Std. Error"],
+      CI_Lower = fit_summary_asset$coefficients[, "95% CI L"],
+      CI_Upper = fit_summary_asset$coefficients[, "95% CI U"],
+      t_value = fit_summary_asset$coefficients[, "t value"],
+      p_value = fit_summary_asset$coefficients[, "Pr(>|t|)"],
+      Balance = balance_status,  # Add balance column
+      n_weight_t = n_treat,
+      n_unweight = n_unweighted,
+      stringsAsFactors = FALSE
+    )
+  }
+  
+  # Combine results for this Name_PAs
+  results_list_hh[[name]] <- do.call(rbind, temp_results)
+}
+
+# Combine all results into a single dataframe
+final_results_hh <- do.call(rbind, results_list_hh)
+
+# Filter rows where Balance is not "No"
+final_results_hh <- final_results_hh[final_results_hh$Balance != "No", ]
+final_results_hh <- na.omit(final_results_hh)
+write.csv(final_results_hh, "final_results_hh.csv")
+
+#subset just ATE
+final_results_hh$sig_ATE <- ifelse(final_results_hh$p_value > 0.05, 0, final_results_hh$ATE) #change any non-sig ATEs to 0
+hh_results_subset <- subset(final_results_hh, select = c(Name_PAs, Output, sig_ATE))
+
+#change to wide dataframe
+hh_results_wide <- hh_results_subset %>%
+  group_by(Name_PAs) %>%
+  pivot_wider(names_from = Output, values_from = sig_ATE)
+names(hh_results_wide) <- c("Name_PAs", "MAHFP_ATE", "HDDS_ATE", "asset_ATE")
+```
+
+# STEP 8:BRING DATA FROM ALL OUTPUTS TOGETHER AND SCALE
+
+```{r STEP 8}
+
+#join strict and less strict
+S_LS_results_wide <- rbind(S_results_wide, LS_results_wide)
+
+#join biodiversity and hh
+all_results_wide <- full_join(S_LS_results_wide, hh_results_wide, by = "Name_PAs")
+
+#remove NA to only keep PAs which have results for biodiversity and wellbeing
+all_results_wide_noNA <- na.omit(all_results_wide)
+
+#put all results on same timeline (divide by number of years measured over)
+all_results_wide_noNA$Forest_ATE <-all_results_wide_noNA$Forest_ATE/21
+all_results_wide_noNA$Agri_ATE <- all_results_wide_noNA$Agri_ATE/16
+all_results_wide_noNA$Grass_ATE <- all_results_wide_noNA$Grass_ATE/20
+all_results_wide_noNA$MAHFP_ATE <-all_results_wide_noNA$MAHFP_ATE/5
+all_results_wide_noNA$HDDS_ATE <- all_results_wide_noNA$HDDS_ATE/5
+all_results_wide_noNA$asset_ATE <- all_results_wide_noNA$asset_ATE/5
+
+#scale
+# Identify columns to scale
+numeric_cols <- c("Forest_ATE", "Grass_ATE", "Agri_ATE", "MAHFP_ATE", "HDDS_ATE", "asset_ATE")
+
+# Create a new dataframe with Name_PAs and scaled values
+Final_results_scaled <- data.frame(
+  Name_PAs = all_results_wide_noNA$Name_PAs,
+  scale(all_results_wide_noNA[numeric_cols], center = FALSE, scale = TRUE)
+)
+
+
+#reverse agri so positive = positive
+Final_results_scaled$Agri_ATE <- Final_results_scaled$Agri_ATE * -1
+
+#sum biodiversity and poverty variables
+
+Final_results_scaled$biodiversity <- Final_results_scaled$Forest_ATE + Final_results_scaled$Grass_ATE + Final_results_scaled$Agri_ATE
+
+Final_results_scaled$poverty <- Final_results_scaled$MAHFP_ATE + Final_results_scaled$HDDS_ATE + Final_results_scaled$asset_ATE
+
+average_data_new <- subset(Final_results_scaled, select = c(Name_PAs, biodiversity, poverty))
+
+
+#correct naming of PAs
+average_data_new$Name_PAs <- gsub('\\.', ' ', average_data_new$Name_PAs)
+
+#join with strictness info
+PA_strictness <- read.csv("PA_strictness.csv")
+average_data_new <- full_join(average_data_new, PA_strictness, by = "Name_PAs")
+average_data_new <- na.omit(average_data_new)
+
+average_data_new$Name_PAs <- gsub('Abune_yosef_Zigit_Abohoy_Gara', 'Abune Yosef Zigit Abohoy Gara', average_data_new$Name_PAs)
+average_data_new$Name_PAs <- gsub('Guna_Mountain', 'Guna Mountain', average_data_new$Name_PAs)
+average_data_new$Name_PAs <- gsub('Borena_sayint_Worehimano', 'Borena Sayint Worehimano', average_data_new$Name_PAs)
+
+average_data_new <- average_data_new %>%
+  mutate(Name_PAs = paste(Name_PAs, " (", S_LS_BR, ")", sep = ""))
+
+average_data_new$Name_PAs <- gsub("\\(BR\\)", "(LS)", average_data_new$Name_PAs)
+
+#subset and order data by biodiversity outcomes
+average_data_new <- subset(average_data_new, select = c(Name_PAs, biodiversity, poverty))
+average_data_new$Name_PAs <- factor(average_data_new$Name_PAs, levels = unique(average_data_new$Name_PAs[order(average_data_new$biodiversity, decreasing = F)]))
+```
+
+# STEP 9: PLOT INDIVIDUAL PA RESULTS
+
+This figure shows that performance varies across individual protected areas and across Ethiopia's PA network there is a mixture of win-wins, trade-offs and lose-lose outcomes. 
+
+```{r STEP 9, fig.width=15, fig.height=10}
+
+filtered_data_long_new <- gather(average_data_new, key = "Variable", value = "Value", -Name_PAs)
+
+# Plotting
+PA_trade_offs <- ggplot(filtered_data_long_new, aes(x = Value, y = Name_PAs, colour = Variable)) +
+  geom_point(size = 3) +
+  geom_hline(yintercept = seq(0.5, nrow(average_data_new) - 0.5), linetype = "solid", color = "grey80", size = 0.3) +
+  scale_color_manual(values = c("#009E73", "#CC79A7"), guide = FALSE) +
+  theme_classic(base_size = 13) +
+  theme(axis.line.y = element_blank(), axis.ticks.y = element_blank(), axis.title.y = element_blank(),
+        axis.text.y = element_text(size = 13,colour = c("#CC79A7", "#808080", "#CC79A7", "#CC79A7", "#CC79A7", "#808080", "#CC79A7", "#808080", "#009E73", "#009E73", 
+                                                        "#E69F00", "#E69F00", "#009E73","#009E73", "#009E73", "#E69F00", "#009E73","#009E73", "#009E73", "#009E73","#E69F00" ,"#009E73", "#009E73","#E69F00",  "#009E73" )))+
+  labs(title = "", x = "Sum of scaled ATEs\n(Positive value = PA performing\nbetter than matched controls)") +
+  geom_vline(xintercept = 0, linetype = "solid", color = "black", size = .8) 
+
+PA_trade_offs
+```
+
+#STEP 10: See if biodiversity outcomes are a predictor of wellbeing outcomes
+
+Although there are trade-offs occuring between biodiveristy and wellbeing outcomes, biodiversity performance is not a siginificant predictor of wellbeing performance 
+
+```{r STEP 10}
+
+linear_bio_pov_type <- lm(poverty ~ biodiversity, data = average_data_new)
+summary(linear_bio_pov_type)
+
+```
+
+# STEP 11: See how budget impacts performance
+
+
+```{r STEP 11}
+
+#correct naming
+performance_dat <- average_data_new %>%
+  separate(Name_PAs, into = c("Name_PAs", "PA_type"), sep = " \\(", extra = "drop") %>%
+  mutate(PA_type = gsub("\\)", "", PA_type))
+
+#get performance column
+performance_dat <- performance_dat %>%
+  mutate(performance = case_when(
+    poverty > 0 & biodiversity > 0 ~ "Win",
+    poverty < 0 & biodiversity < 0 ~ "Lose",
+    TRUE ~ "Trade-offs"
+  ))
+
+#Bring in budget data
+budget_dat <- read.csv("Budget_scaled_2014_inflation.csv")
+budget_dat2 <- full_join(budget_dat, performance_dat, by = "Name_PAs")
+budget_dat2 <- na.omit(budget_dat2)
+budget_dat2$Budget_dollar <- budget_dat2$Avr_budg_scale_2014_infla_USD
+
+#Bring in area data
+PA_area <- read.csv("Updated_PA_area_Dec24.csv")
+budget_dat2 <- full_join(budget_dat2, PA_area, by = "Name_PAs")
+budget_dat2$budget_scaled_area <- budget_dat2$Budget_dollar/((budget_dat2$AREA_km2))
+budget_dat2 <- na.omit(budget_dat2)
+
+cor(budget_dat2$Avr_budg_scale_2014_infla_USD, budget_dat2$AREA_km2)
+
+
+#categorise outcomes
+budget_dat2 <- budget_dat2 %>%
+  mutate(performance = case_when(
+    poverty > 0 & biodiversity > 0 ~ "Win-win",        # Both positive: win-win
+    poverty <= 0 & biodiversity <= 0 ~ "Lose-lose",      # Both negative: lose-lose
+    poverty > 0 & biodiversity <= 0 ~ "Wellbeing win",   # Poverty positive, biodiversity 0 or negative: poverty win
+    biodiversity > 0 & poverty <= 0 ~ "Environment win", # Biodiversity positive, poverty 0 or negative: biodiversity win
+    TRUE ~ NA                              # Any other case:NA
+  ))
+
+table(budget_dat2$performance)
+
+#plot budgets by outcome
+budget_dat2$performance <- factor(budget_dat2$performance, 
+                                   levels = c("Lose-lose",  "Wellbeing win", "Environment win","Win-win"))
+
+
+
+budget_box <- ggplot(budget_dat2, aes(x = performance, y = Avr_budg_scale_2014_infla_USD / 1000, fill = performance, colour = performance)) +
+  # First boxplot: colored by performance
+  geom_b(lwd = 0.1, outlier.size = 0.3, outlier.color = "#808080", outlier.shape = NA) +
+
+  # Jittered black points
+  geom_jitter(size = 0.3, alpha = 0.4, width = 0.1, colour = "black", show.legend = FALSE) +
+
+  # Second boxplot: black outline
+  geom_boxplot(lwd = 0.1, colour = "black", fill = NA, outlier.shape = NA) +
+
+  labs(x = "Performance",
+       y = expression("Average annual budget ('000 USD)")) +
+
+  scale_fill_manual(values = c("Lose-lose" = "#808080", 
+                               "Wellbeing win" = "#CC79A7", 
+                               "Environment win" = "#009E73", 
+                               "Win-win" = "#E69F00")) +
+
+  scale_color_manual(values = c("Lose-lose" = "#808080", 
+                                "Wellbeing win" = "#CC79A7", 
+                                "Environment win" = "#009E73", 
+                                "Win-win" = "#E69F00")) +
+
+  scale_y_continuous(limits = c(0, 400)) +
+
+  theme_classic(base_size = 8) +
+  theme(
+    legend.position = "none",
+    axis.text = element_text(colour = "black", size = 7),
+    axis.title.y = element_blank(),
+    panel.background = element_rect(fill = "transparent", color = NA),
+    plot.background = element_rect(fill = "white", color = NA)
+  ) +
+
+  coord_flip()
+
+budget_box
+
+budget_summary <- budget_dat2 %>%
+  group_by(performance) %>%
+  summarise(
+    mean_budget = mean(Avr_budg_scale_2014_infla_USD / 1000, na.rm = TRUE),
+    n = n(),
+    sd = sd(Avr_budg_scale_2014_infla_USD / 1000, na.rm = TRUE),
+    se = sd / sqrt(n),
+    ci = 1.96 * se
+  )
+
+
+budget_bar_ci <- ggplot(budget_summary, aes(x = reorder(performance, mean_budget), y = mean_budget, fill = performance)) +
+  geom_bar(stat = "identity", width = 0.6, color = "black") +
+  geom_errorbar(aes(ymin = mean_budget - se, ymax = mean_budget + se), width = 0.2, linewidth = 0.3) +
+  labs(x = "Performance", y = "Average annual budget ('000 USD)") +
+  scale_fill_manual(values = c("Lose-lose" = "#808080", 
+                               "Wellbeing win" = "#CC79A7",
+                               "Environment win" = "#009E73", 
+                               "Win-win" = "#E69F00")) +
+  scale_y_continuous(limits = c(0, NA), expand = c(0, 0)) +
+  theme_classic(base_size = 8) +
+  theme(
+    legend.position = "none",
+    axis.text = element_text(colour = "black", size = 7),
+    axis.title.y = element_blank(),
+    panel.background = element_rect(fill = "transparent", color = NA),
+    plot.background = element_rect(fill = "white", color = NA)
+  ) +
+  coord_flip()  # Horizontal bars for readability
+
+budget_bar_ci
+
+ggsave("Budget_boxplot_15May25.png", budget_box, height = 6, width = 7.5, units = "cm", dpi = 300)
+
+```
+
+# STEP 12: determine whether budget is a significant predictor of ATE 
+
+```{r STEP 12}
+
+#scale
+# Identify columns to scale
+numeric_cols <- c("Forest_ATE", "Grass_ATE", "Agri_ATE", "MAHFP_ATE", "HDDS_ATE", "asset_ATE")
+
+# Create a new dataframe with Name_PAs and scaled values
+All_results_scaled <- data.frame(
+  Name_PAs = all_results_wide$Name_PAs,
+  scale(all_results_wide[numeric_cols], center = FALSE, scale = TRUE)
+)
+
+
+#reverse agri so positive = positive
+All_results_scaled$Agri_ATE <- All_results_scaled$Agri_ATE * -1
+
+#sum biodiversity and poverty variables
+
+All_results_scaled$biodiversity <- All_results_scaled$Forest_ATE + All_results_scaled$Grass_ATE + All_results_scaled$Agri_ATE
+
+All_results_scaled$poverty <- All_results_scaled$MAHFP_ATE + All_results_scaled$HDDS_ATE + All_results_scaled$asset_ATE
+
+All_results_scaled$Name_PAs <- gsub('\\.', ' ', All_results_scaled$Name_PAs)
+
+
+Results_budget <- full_join(All_results_scaled, budget_dat, by = "Name_PAs")
+Results_budget <- full_join(Results_budget, PA_area, by = "Name_PAs")
+Results_budget <- Results_budget %>%
+  filter(
+    !(if_all(2:9, is.na))
+  )
+
+cor(Results_budget$Avr_budg_scale_2014_infla_USD, Results_budget$AREA_km2)
+
+env_dat <- Results_budget %>%
+  filter(
+    !(if_all(2:4, is.na))
+  )
+
+pov_dat<- Results_budget %>%
+  filter(
+    !(if_all(5:7, is.na))
+  )
+
+rda.env <- rda(env_dat$Forest_ATE + env_dat$Grass_ATE + env_dat$Agri_ATE ~ env_dat$Avr_budg_scale_2014_infla_USD + env_dat$AREA_km2, data = env_dat, scale=F)
+
+resid_mat <- residuals(rda.env)
+fitted_mat <- fitted(rda.env)
+plot(fitted_mat, resid_mat)
+summary(rda.env)
+set.seed(200)  # Set the seed for reproducibility
+anova.cca(rda.env, step = 1000, by="term")
+
+rda.pov <- rda(pov_dat$MAHFP_ATE + pov_dat$HDDS_ATE + pov_dat$asset_ATE ~ pov_dat$Avr_budg_scale_2014_infla_USD + AREA_km2, data = pov_dat, scale=F)
+
+resid_mat <- residuals(rda.pov)
+fitted_mat <- fitted(rda.pov)
+plot(fitted_mat, resid_mat)
+summary(rda.pov)
+set.seed(200)
+anova.cca(rda.pov, step = 1000, by="term")
+
+#test to see if just budget is better for environment - YES
+rda.env2 <- rda(env_dat$Forest_ATE + env_dat$Grass_ATE + env_dat$Agri_ATE ~ env_dat$Avr_budg_scale_2014_infla_USD, data = env_dat, scale=F)
+set.seed(200)  # Set the seed for reproducibility
+anova.cca(rda.env2, step = 1000, by="term")
+
+#higher partial r2 in the reduced model with just budget
+RsquareAdj(rda.env)
+RsquareAdj(rda.env2)
+
+#adding area doesn't significantly improve model fit
+rda.partial <- rda(env_dat$Forest_ATE + env_dat$Grass_ATE + env_dat$Agri_ATE ~ env_dat$Avr_budg_scale_2014_infla_USD + Condition(env_dat$AREA_km2), data = env_dat, scale = FALSE)
+anova.cca(rda.partial, step = 1000)  # Test AREA_km2 conditional effect
+
+#test to see if just budget is better for poverty 
+#test to see if just budget is better
+rda.pov2 <- rda(pov_dat$MAHFP_ATE + pov_dat$HDDS_ATE + pov_dat$asset_ATE ~ pov_dat$Avr_budg_scale_2014_infla_USD, data = pov_dat, scale=F)
+set.seed(200)  # Set the seed for reproducibility
+anova.cca(rda.pov2, step = 1000, by="term")
+
+
+#adding area doesn't significantly improve model fit
+rda.partial_pov <- rda(pov_dat$MAHFP_ATE + pov_dat$HDDS_ATE + pov_dat$asset_ATE ~ pov_dat$Avr_budg_scale_2014_infla_USD + Condition(pov_dat$AREA_km2), data = pov_dat, scale = FALSE)
+anova.cca(rda.partial_pov, step = 1000)  # Test AREA_km2 conditional effect
+
+```
