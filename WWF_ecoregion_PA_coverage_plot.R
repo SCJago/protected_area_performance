@@ -1,3 +1,8 @@
+########################################
+# Ethiopia PA Ecoregion Representativeness Analysis
+# Authors: Sophie Jago
+# Description: Assess representativeness of Ethiopia's protected area network across ecoregions 
+########################################
 # =============================================================================
 # Ecoregion Representation in Ethiopia's Protected Areas
 # =============================================================================
