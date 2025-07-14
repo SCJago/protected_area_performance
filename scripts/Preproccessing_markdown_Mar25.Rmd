@@ -797,14 +797,4 @@ head(pca_loadings_16, 10)
   
   #save_csv 
   write.csv(hh_type_cov_output_clean, "hh_type_cov_output_clean.csv")
-  
-  #check overall changes
-  library(Rmisc)
-  mins_change_summary <- summarySE(hh_type_cov_output_clean, measurevar="MINS_change", groupvars=c("type"))
-  #control 0.09, treatment -0.54; start 11.09 and 11.32; end 11.18, 10.78
-  hdds_change_summary <- summarySE(hh_type_cov_output_clean, measurevar="HDDS_2015", groupvars=c("type"))
-  # control 0.44, treatment 0.51, start 6.18 and 6.43, end 6.63, 6.94
-  asset_change_summary <- summarySE(hh_type_cov_output_clean, measurevar="asset_change", groupvars=c("type"))
-  #control 0.37, treatment -0.01, start -0.06, 0.39
-  
 ``` 
