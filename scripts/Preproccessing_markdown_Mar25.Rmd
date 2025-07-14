@@ -1,0 +1,810 @@
+---
+title: "Preproccessing_for_matching"
+author: "Sophie Jago"
+date: "2024-03-24"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#SET UP
+
+```{r}
+#set working directory
+setwd("~/Papers/Ethiopia - PA history review/Counterfactual analysis/Preprocessing_hh_covariates")
+
+#Load libraries
+  library(sf)
+  library(dplyr)
+  library(ggplot2)
+  library(raster)
+  library(exactextractr)
+  library(gstat)
+  library(tidyverse) 
+  library(psych)      
+
+```
+  
+# STEP 1: LOAD GRIDCELLS AND OUTPUT DATA
+
+```{r STEP 1}
+
+  # Load the grid cells shapefile
+  all_gridcells <- st_read("All_1km_grid_ID.shp")
+
+  # Load land cover change data 
+  forest_loss <- read.csv("Updated_forest_loss_211223.csv") #bring in forest data from GIS
+  agri_change <- read.csv("Agri_percent_change.csv") #bring in agri data from GIS
+  grassland_change <- read.csv("Percentage_grassland_change.csv") #bring in grassland data from GIS
+  
+  #join and clean land cover change data
+  all_gridcells <- all_gridcells %>%
+  full_join(forest_loss, by = "PageNumber") %>%
+  full_join(agri_change, by = "PageNumber") %>%
+  full_join(grassland_change, by = "PageNumber")
+  
+  all_gridcells <- all_gridcells %>%
+  filter(!is.na(Forest_change) & 
+         !is.na(Percent_agriculturechange) & 
+         !is.na(Percent_grass_change))
+
+  # Extract the coordinates of each grid cell's centroid
+  all_gridcells_centroids <- st_centroid(all_gridcells)
+  
+  # Get the x and y coordinates of the centroids
+  coords <- st_coordinates(all_gridcells_centroids)
+
+  # Add the coordinates as columns to the original grid cells dataframe
+  all_gridcells <- all_gridcells %>%
+    mutate(x_coord = coords[, 1],
+           y_coord = coords[, 2])
+```
+
+# STEP 2: CHECK SPATIAL AUTOCORRELATION WITH DIFFERENT SAMPLING DISTANCES
+
+```{STEP 2, eval = FALSE}
+  # Convert from sf object to SpatialPointsDataFrame (for gstat compatibility)
+  all_gridcells_sp <- as(all_gridcells, "Spatial")
+
+  # Compute the semivariogram for all gridcells using 'Forest_change'
+  variogram_model <- variogram(Forest_change ~ 1, all_gridcells)
+  plot(variogram_model)
+
+  #set up function to grid sample at different distances
+  sample_gridcells <- function(grid_data, d) {
+    grid_data <- grid_data %>%
+      mutate(super_x = floor(x_coord / (d * 1000)),
+             super_y = floor(y_coord / (d * 1000))) %>%
+      group_by(super_x, super_y) %>%
+      filter(n() == (d^2)) %>%  # Ensure full block
+      slice(ceiling((d^2)/2)) %>%  # Select middle grid cell
+      ungroup()
+    return(grid_data)
+  }
+
+  # Try different sampling distances
+  sampled_3km <- sample_gridcells(all_gridcells, 3)
+  sampled_5km <- sample_gridcells(all_gridcells, 5)
+  sampled_7km <- sample_gridcells(all_gridcells, 7)
+
+  # Define a function to compute and plot semivariograms
+  plot_semivariogram_sf <- function(grid_data, dist_label) {
+    
+    # Convert from sf object to SpatialPointsDataFrame (for gstat compatibility)
+    grid_data_sp <- as(grid_data, "Spatial")
+    
+    # Create the variogram object
+    variogram_model <- variogram(Forest_change ~ 1, grid_data_sp)
+    
+    # Convert variogram object to a data frame for tabular output
+     variogram_table <- as.data.frame(variogram_model)
+     print(variogram_table)
+    
+    # Create the plot
+    semivariogram_plot <- plot(variogram_model)
+    
+    return(list(variogram_table = variogram_table, semivariogram_plot = semivariogram_plot))
+  }
+  
+#check 1km
+  test_1km <- function(grid_data) {
+  grid_data %>%
+    mutate(
+      super_x = floor(x_coord / 2000),  # Group every 2 km in x
+      super_y = floor(y_coord / 2000)   # Group every 2 km in y
+    ) %>%
+    group_by(super_x, super_y) %>%
+    slice(1) %>%  # Pick one grid cell per 2x2 km block
+    ungroup()
+}
+
+# Sample grid cells at 1 km spacing
+sampled_1km <- test_1km(all_gridcells)
+
+  # Compute and plot semivariograms for each of the sampled distances (assuming they're in 'sf'   format)
+  semivariogram_1km <- plot_semivariogram_sf(sampled_1km, "1km")
+  semivariogram_3km <- plot_semivariogram_sf(sampled_3km, "3km")
+  semivariogram_5km <- plot_semivariogram_sf(sampled_5km, "5km")
+  semivariogram_7km <- plot_semivariogram_sf(sampled_7km, "7km")
+  
+  # Print tables
+  semivariogram_1km$variogram_table
+  semivariogram_3km$variogram_table
+  semivariogram_5km$variogram_table
+  semivariogram_7km$variogram_table
+  
+  #Print plots
+  semivariogram_1km$semivariogram_plot
+  semivariogram_3km$semivariogram_plot
+  semivariogram_5km$semivariogram_plot
+  semivariogram_7km$semivariogram_plot
+
+  #combine to compare
+  combined_variograms <- bind_rows(
+    mutate(variogram_model, Distance = "0km"),
+    mutate(semivariogram_1km$variogram_table, Distance = "1km"),
+    mutate(semivariogram_3km$variogram_table, Distance = "3km"),
+    mutate(semivariogram_5km$variogram_table, Distance = "5km"),
+    mutate(semivariogram_7km$variogram_table, Distance = "7km")
+  )
+
+  combined_variograms %>%
+    group_by(Distance) %>%
+    summarise(
+      Mean_Semivariance = mean(gamma),
+      Max_Semivariance = max(gamma),
+      Min_Semivariance = min(gamma)
+    )
+```
+
+# STEP 3: SAMPLE ALL GRIDCELLS WITH GRID SAMPLING TECHNIQUE TO ENSURE ALL 2KM APART
+```{r STEP 3}
+
+ # Create new columns for 'super grid' coordinates by dividing the coordinates by 3000 (3 km)
+  # This groups the 1x1 km cells into 3x3 km blocks
+  all_gridcells <- all_gridcells %>%
+    mutate(super_x = floor(x_coord / 3000),
+           super_y = floor(y_coord / 3000))
+  
+  # Group by 'super_x' and 'super_y' to represent 3x3 blocks, then select the middle grid cell
+  sampled_gridcells <- all_gridcells %>%
+    group_by(super_x, super_y) %>%
+    filter(n() == 9) %>%  # Ensure it's a full 3x3 block
+    slice(5) %>%  # Select the middle grid cell (5th element in a 3x3 grid)
+    ungroup()
+
+```
+
+# STEP 4: PREP PA AND GRIDCELL DATASETS FOR ASSIGNING CELLS 
+
+```{r STEP 4}
+  # Ensure both geometries are 2D
+  ETH_PAs <- st_read("Eth_PAs_sep24.shp")
+  sampled_gridcells <- st_zm(sampled_gridcells, drop = TRUE, what = "ZM")
+  ETH_PAs <- st_zm(ETH_PAs, drop = TRUE, what = "ZM")
+  
+  # Check for and fix invalid geometries
+  sampled_gridcells <- st_make_valid(sampled_gridcells)
+  ETH_PAs <- st_make_valid(ETH_PAs)
+  
+  # Check the CRS of both layers
+  st_crs(sampled_gridcells)
+  st_crs(ETH_PAs)
+  
+  # Transform ETH_PAs to match sampled_gridcells if they are not the same
+  if (st_crs(sampled_gridcells) != st_crs(ETH_PAs)) {
+    ETH_PAs <- st_transform(ETH_PAs, st_crs(sampled_gridcells))
+  }
+```  
+
+#STEP 5: ASSIGN GRIDCELLS TO TREATMENT BUFFER OR CONTROL
+
+```{r STEP 5}  
+  # Assign Treatment (completely within protected areas)
+  sampled_gridcells2 <- sampled_gridcells %>%
+    mutate(type = ifelse(apply(st_within(sampled_gridcells, ETH_PAs, sparse = FALSE), 1, any), 1, 0))
+  
+    head(sampled_gridcells2) # check
+  
+  # Create a 10 km buffer around the protected areas
+  protected_areas_buffer <- st_buffer(ETH_PAs, dist = 10000)
+  
+  # Assign Buffer (within the 5 km buffer but not within protected areas)
+  # Grid cells already assigned as treatment will not be changed
+  sampled_gridcells3 <- sampled_gridcells2 %>%
+    mutate(type = ifelse(type == 0 & apply(st_intersects(sampled_gridcells2, protected_areas_buffer, sparse = FALSE), 1, any), 2, type))
+  
+      head(sampled_gridcells3) # check
+  
+  #Any remaining grid cells are control (already assigned as 0)
+  
+  #Assign NAME_PAs to sampled_gridcells where Type is 1 (treatment)
+  sampled_gridcells4 <- st_join(sampled_gridcells3, ETH_PAs %>%  dplyr::select(NAME_PAs), join = st_within)
+  
+  # Only keep NAME_PAs for cells where type == 1
+  sampled_gridcells4 <- sampled_gridcells4 %>%
+    mutate(Name_PAs = ifelse(type == 1, NAME_PAs, NA))
+  
+  # Clean up: Drop the `NAME_PAs` column added by the join, since we only need `Name_PAs`
+  sampled_gridcells4 <- sampled_gridcells4 %>% dplyr::select(-NAME_PAs)
+  
+  
+  # Perform checks to confirm everything correct
+  table(sampled_gridcells4$type)
+  table(sampled_gridcells4$Name_PAs)
+```
+  
+# STEP 5 PLOT ASSIGNED GRIDCELLS
+
+```{r STEP 5}
+  
+  #plot the sampled gridcells assigned to type
+  # Define color palette for type
+  type_colors <- c("1" = "green", "2" = "yellow", "0" = "gray")
+  
+  # Plot the ETH_PAs and sampled_gridcells colored by type
+  sampled_gridcell_plot <- ggplot() +
+    # Plot ETH_PAs (protected areas)
+    geom_sf(data = ETH_PAs, fill = "white", color = "darkblue", alpha = 0.4) +
+    
+    # Plot sampled_gridcells, colored by the 'type' column
+    geom_sf(data = sampled_gridcells4, aes(fill = as.factor(type)), color = NA, alpha = 0.7) +
+    
+    # Set the color scheme
+    scale_fill_manual(values = type_colors, 
+                      name = "Type",
+                      labels = c("0" = "Control", "1" = "Treatment", "2" = "Buffer")) +
+    
+    # Theme settings for better visual appearance
+    theme_minimal() 
+
+  sampled_gridcell_plot
+  
+  #save plot
+  ggsave(filename = "sampled_gridcell_plot.png", plot = sampled_gridcell_plot, width = 20, height = 16, dpi = 1000)
+
+```
+
+# STEP 7: SAVE SAMPLED GRIDCELL DATASETS AND SHAPEFILE
+
+```{r STEP 7}  
+  # Convert sampled_gridcells to a dataframe
+  sampled_gridcells_df <- as.data.frame(sampled_gridcells4)
+  sampled_gridcells_df <- subset(sampled_gridcells_df, select = c(PageNumber, type, Name_PAs))
+  
+  # Save the dataframe as a CSV file
+  write.csv(sampled_gridcells_df, "sampled_gridcells_Mar25.csv")
+
+```
+
+
+# STEP 8: GET COVARIATES
+
+```{r STEP 8}
+#Import rasters for covariates
+ 
+  #Import individual rasters - important to toggle write world file and write geoTIFF tags when exporting tiff files from GIS
+  elev <- raster("~/Papers/Ethiopia - PA history review/Counterfactual analysis/Covariates/Export_raster_files/elev.tif")
+  ppt <- raster("~/Papers/Ethiopia - PA history review/Counterfactual analysis/Covariates/Export_raster_files/ppt.tif")
+  access <- raster("~/Papers/Ethiopia - PA history review/Counterfactual analysis/Covariates/Export_raster_files/updated_access_2000.tif")
+  forest <- raster("~/Papers/Ethiopia - PA history review/Counterfactual analysis/Covariates/Export_raster_files/forest_Resample_131223.tif")
+  pop <- raster("~/Papers/Ethiopia - PA history review/Counterfactual analysis/Covariates/Export_raster_files/eth_ppp_2000_1km_Agg_3.tif")
+  slope <- raster("~/Papers/Ethiopia - PA history review/Counterfactual analysis/Covariates/Export_raster_files/slope.tif")
+  temp <- raster("~/Papers/Ethiopia - PA history review/Counterfactual analysis/Covariates/Export_raster_files/temp.tif")
+  land <- raster("~/Papers/Ethiopia - PA history review/Counterfactual analysis/Covariates/Export_raster_files/Reclass_landtype_modis_2001.tif")
+  agri <- raster("~/Papers/Ethiopia - PA history review/Counterfactual analysis/Covariates/Export_raster_files/covariate_baseline_agri_2003.tif")
+  agri_suit <- raster("~/Papers/Ethiopia - PA history review/Counterfactual analysis/Covariates/Agri_suitability/agri_suit_rain_clipped_1980-2009.tif")
+  ethnic_pca1 <- raster("~/Papers/Ethiopia - PA history review/Counterfactual analysis/Covariates/Ethnicity/Ethnicity_PCA_Component1.tif")
+  ethnic_pca2 <- raster("~/Papers/Ethiopia - PA history review/Counterfactual analysis/Covariates/Ethnicity/Ethnicity_PCA_Component2.tif")
+  ecoregion <- raster("~/Papers/Ethiopia - PA history review/Counterfactual analysis/Covariates/Ecoregion/Ecoregion_clipped.tif")
+  
+
+  # Make list of rasters
+  raster_list <- list(land, elev, ppt, access, forest, pop, slope, temp, agri, agri_suit, ethnic_pca1, ethnic_pca2, ecoregion)
+  
+   # Rename rasters for easy reference
+  names(raster_list) <- c("Land", "Elevation", "Precipitation", "Access", "Forest", "Population", "Slope", "Temperature", "Agriculture", "Agri_suitability", "Ethnicity1", "Ethnicity2", "Ecoregion")
+
+  #check crs
+  lapply(raster_list, projection)
+  crs(sampled_gridcells4)
+  sampled_gridcells5 <- st_transform(sampled_gridcells4, crs = 4326)
+  target_crs <- crs(sampled_gridcells5)
+  
+
+  #make sure land and ecoregion are factors
+  raster_list$Land <- as.factor(raster_list$Land)
+  raster_list$Ecoregion <- as.factor(raster_list$Ecoregion)
+
+  # Reproject only the rasters that don't match
+for (i in seq_along(raster_list)) {
+   raster_name <- names(raster_list)[i]
+   raster_obj <- raster_list[[i]]
+
+   # Skip continuous rasters that already have the correct CRS
+   if (identical(crs(raster_obj), target_crs)) next  
+
+   message("Reprojecting raster: ", raster_name)
+
+   # Use nearest neighbor for categorical variables (Land & Ecoregion)
+   if (raster_name %in% c("Land", "Ecoregion")) {
+      raster_list[[i]] <- projectRaster(raster_obj, crs = target_crs, 
+                                        method = "ngb",  # Nearest neighbor for categorical
+                                        filename = paste0(tempfile(), ".tif"),
+                                        overwrite = TRUE)
+   } else {
+      # Skip continuous rasters if CRS is already correct
+      raster_list[[i]] <- projectRaster(raster_obj, crs = target_crs, 
+                                        method = "bilinear",  # Smoother for continuous
+                                        filename = paste0(tempfile(), ".tif"),
+                                        overwrite = TRUE)
+   }
+}
+
+raster_list$Land <- projectRaster(raster_list$Land, crs = target_crs, method = "ngb")
+raster_list$Ecoregion <- projectRaster(raster_list$Ecoregion, crs = target_crs, method = "ngb")
+
+#check categorical variables are still integers
+land_values <- getValues(raster_list$Land)  # Get all raster values
+land_values <- land_values[!is.na(land_values)]  # Remove NA values
+all(land_values == as.integer(land_values))
+ecoregion_values <- getValues(raster_list$Ecoregion)  # Get all raster values
+ecoregion_values <- ecoregion_values[!is.na(ecoregion_values)]  # Remove NA values
+all(ecoregion_values == as.integer(ecoregion_values))
+
+  #Set the CRS for raster data to match sampled_gridcells
+ # for (i in seq_along(raster_list)) {
+ #   raster_list[[i]] <- projectRaster(raster_list[[i]], crs = st_crs(sampled_gridcells4)$proj4string)
+ # }
+  
+``` 
+
+# STEP 9: ASSIGN COVARIATE VALUES TO SAMPLED GRIDCELLS  
+
+```{r STEP 9}
+  
+  # Initialize a dataframe to store covariate values
+  covariates <- data.frame(PageNumber = sampled_gridcells5$PageNumber)
+  
+  # Loop through all rasters and extract covariate values
+  for (raster_name in names(raster_list)) {
+    if (raster_name %in% c("Land", "Ecoregion")) {
+      # For categorical data (land type), use modal value
+      covariates[[raster_name]] <- exact_extract(raster_list[[raster_name]], sampled_gridcells5, fun = "majority",  progress = FALSE)
+    } else {
+      # For continuous data, use mean value
+      covariates[[raster_name]] <- exact_extract(raster_list[[raster_name]], sampled_gridcells5, fun = "mean", progress = FALSE)
+    }
+  }
+
+all(covariates$Land == as.integer(covariates$Land))
+all(covariates$Ecoregion == as.integer(covariates$Ecoregion))
+unique(covariates$Ecoregion[!is.na(covariates$Ecoregion) & covariates$Ecoregion != as.integer(covariates$Ecoregion)])
+
+  # Remove duplicates based on PageNumber
+  sampled_gridcells6 <- sampled_gridcells5 %>%
+    distinct(PageNumber, .keep_all = TRUE)
+  covariates2 <- covariates %>%
+    distinct(PageNumber, .keep_all = TRUE)
+  
+  
+  #join covariates with gridcell data
+  sampled_gridcells_with_covariates <- sampled_gridcells6 %>%
+    left_join(covariates2, by = "PageNumber")
+  
+  # View the resulting dataframe
+  head(sampled_gridcells_with_covariates)
+  
+
+  # Omit rows where Type is NA
+  sampled_gridcells_with_covariates2 <- sampled_gridcells_with_covariates[!is.na(sampled_gridcells_with_covariates$type), ]
+  
+  
+  #add in initial grass covariate #from GIS
+  grass <- read.csv("initial_grass.csv")
+  sampled_gridcells_with_covariates3 <- full_join(sampled_gridcells_with_covariates2, grass, by = "PageNumber")
+  sampled_gridcells_with_covariates3 <- sampled_gridcells_with_covariates3[!is.na(sampled_gridcells_with_covariates3$type), ]
+```  
+
+# STEP 10: ADD PA YEAR FOR REFERENCE
+
+```{r STEP 10}
+  PA_year <- read.csv("Earliest_PA_year.csv")
+  sampled_gridcells_with_covariates4 <- full_join(sampled_gridcells_with_covariates3, PA_year, by = "Name_PAs")
+  sampled_gridcells_with_covariates4 <- sampled_gridcells_with_covariates4[!is.na(sampled_gridcells_with_covariates4$type), ]
+```  
+  
+# STEP 11: SAVE SHAPEFILE AND CSV
+
+```{r STEP 11}  
+  # Save the dataframe as a CSV file
+  df_sampled_gridcells <- st_drop_geometry(sampled_gridcells_with_covariates4)
+  df_sampled_gridcells <- as.data.frame(df_sampled_gridcells)
+  write.csv(df_sampled_gridcells, "df_sampled_gridcells_with_covariates_Mar25.csv")
+
+```
+
+# STEP 12: BRING IN HOUSEHOLD DATA 
+
+```{r STEP 12}
+  #household IDs are large numbers avoid them being converted to scientific notation by running:
+  options(scipen = 999)
+  
+  # Read and prepare household points data
+  hh_points <- read.csv("pub_eth_householdgeovariables_y1.csv")
+  df_sf <- st_as_sf(hh_points, coords = c("LON_DD_MOD", "LAT_DD_MOD"), crs = 4326)
+  
+  # Reproject points to UTM Zone 37N
+  df_sf_utm <- st_transform(df_sf, crs = 32637)
+```
+
+# STEP 13: BRING IN PA SHAPEFILE AND ADD BUFFER
+
+```{r STEP 13}  
+  # Read and prepare shapefile data
+  shapefile_data <- st_read("Eth_PAs_sep24.shp")
+  
+  
+  # Reproject shapefile data to UTM Zone 37N
+  # Check for invalid geometries
+  invalid_geometries <- st_is_valid(shapefile_data)
+  
+  # Print summary of invalid geometries
+  table(invalid_geometries)
+  
+  if (!require("lwgeom")) install.packages("lwgeom")
+  library(lwgeom)
+  
+  # Fix invalid geometries
+  shapefile_data <- st_make_valid(shapefile_data)
+  
+  shapefile_data_utm <- st_transform(shapefile_data, crs = 32637)
+  
+# Create 10 km and 20 km buffers around each polygon
+  buffer_10km_polygons <- st_buffer(shapefile_data_utm, dist = 10000)
+  buffer_20km_polygons <- st_buffer(shapefile_data_utm, dist = 20000)
+```
+
+# STEP 14: ASSIGN TREATMENT AND CONTROL HOUSEHOLDS BASED ON OVERLAP
+
+```{r STEP 14}  
+# Check overlaps for treatment households (within 10 km buffer)
+  intersections_10km <- st_intersects(df_sf_utm, buffer_10km_polygons)
+  hh_points$Type <- ifelse(sapply(intersections_10km, length) > 0, 1, 0)
+  
+  # Check overlaps for buffer households (within 20 km buffer but outside 10 km buffer)
+  intersections_20km <- st_intersects(df_sf_utm, buffer_20km_polygons)
+  hh_points$Type <- ifelse(hh_points$Type == 0 & sapply(intersections_20km, length) > 0, 2, hh_points$Type)
+  
+    # Create a base plot for the protected areas using ggplot
+  hh_type_plot <- ggplot() +
+    # Plot the protected areas with distinct colors for each PA
+    geom_sf(data = shapefile_data_utm, aes(fill = NAME_PAs), color = "black",fill = "black", alpha = 0.5) +
+    
+    # Plot the household points, colored by their 'Type'
+    geom_sf(data = df_sf_utm, aes(color = as.factor(hh_points$Type)), size = 1) +
+    
+    # Set color scale for household points based on Type
+    scale_color_manual(values = c("0" = "grey", "1" = "green", "2" = "yellow"),
+                       labels = c("Control", "Treatment", "Buffer")) +
+    
+    # Improve the theme and plot appearance
+    theme_minimal() +
+    theme(legend.position = "none")
+  
+  hh_type_plot
+  
+  hh_points_loc <- full_join(df_sf_utm, hh_points_simple, by = "household_id")
+  hh_points_loc <- subset(hh_points_loc, select = c(type))
+  st_write(hh_points_loc, "household_points_loc_type.shp", append = F)
+```
+
+# STEP 15: GET PA NAMES
+
+```{R STEP 15}  
+# Subset rows where Type is 1
+  hh_points_type_1 <- hh_points[hh_points$Type == 1, ]
+  df_sf_utm_type_1 <- df_sf_utm[hh_points$Type == 1, ]
+  
+  # Calculate distance to each PA polygon
+  distances <- st_distance(df_sf_utm_type_1, shapefile_data_utm)
+  
+  # Find the nearest polygon for each point
+  nearest_polygon_indices <- apply(distances, 1, which.min)
+  
+  # Extract the Comb_names for the nearest polygons
+  nearest_polygons <- shapefile_data_utm[nearest_polygon_indices, ]
+  hh_points_type_1$Name_PAs <- nearest_polygons$NAME_PAs
+  
+  # Update the original hh_points with the nearest Comb_names
+  hh_points$Name_PAs <- NA  # Initialize column
+  hh_points[hh_points$Type == 1, "Name_PAs"] <- hh_points_type_1$Name_PAs
+  
+  # View the updated hh_points
+  table(hh_points$Name_PAs)
+  
+  #subset just household_id, lat, lon, Type and NamePAs
+  hh_points_simple <- subset(hh_points,select = c(household_id, LAT_DD_MOD, LON_DD_MOD, Type, Name_PAs))
+  names(hh_points_simple) <- c("household_id", "lat", "lon", "type", "Name_PAs")
+  
+  #save csv
+  write.csv(hh_points_simple, "hh_coords_w_PA_info.csv", append=F) 
+```
+  
+# STEP 16: ASSIGN HOUSEHOLD COVARIATE VALUES
+
+```{r STEP 16}  
+
+#put buffer around household
+  hh_map <- st_as_sf(hh_points_simple, coords = c("lon", "lat"), crs = 4326)
+ 
+  hh_map <- st_transform(hh_map, crs = 32637)
+  
+  # Create 2 km buffer around each point
+  hh_buffer_2km <- st_buffer(hh_map, dist = 2000)
+ 
+  st_crs(hh_buffer_2km)
+  
+  hh_raster_list <- raster_list
+ 
+
+  #Set the CRS for raster data to match sampled_gridcells
+  lapply(hh_raster_list, crs) # Check the CRS 
+  
+  hh_buffer_2km_reprojected <- st_transform(hh_buffer_2km, crs(hh_raster_list[[1]]))
+  crs(hh_buffer_2km_reprojected)
+  
+  #for (i in seq_along(hh_raster_list)) {
+   # hh_raster_list[[i]] <- projectRaster(hh_raster_list[[i]], crs = st_crs(hh_buffer_2km)$proj4string)
+  #}
+  
+  #Assign covariates
+  # Initialize a dataframe to store covariate values
+  hh_covariates <- data.frame(household_id = hh_buffer_2km$household_id)
+  head(hh_covariates)
+  (names(hh_raster_list))
+  
+  
+  # Loop through all rasters and extract covariate values weighted by fraction of cell in polygon 
+  for (raster_name in names(hh_raster_list)) {
+    if  (raster_name %in% c("Land", "Ecoregion")) {
+      # For categorical data (land type), use modal value
+      hh_covariates[[raster_name]] <- exact_extract(hh_raster_list[[raster_name]], hh_buffer_2km_reprojected, fun = "majority",  progress = FALSE)
+    } else {
+      # For continuous data, use mean value
+      hh_covariates[[raster_name]] <- exact_extract(hh_raster_list[[raster_name]], hh_buffer_2km_reprojected, fun = "mean",progress = FALSE)
+    }
+  }
+  
+all(hh_covariates$Land == as.integer(hh_covariates$Land))
+all(hh_covariates$Ecoregion == as.integer(hh_covariates$Ecoregion))  
+unique(covariates$Ecoregion[!is.na(covariates$Ecoregion) & covariates$Ecoregion != as.integer(covariates$Ecoregion)])
+
+  #save_csv
+  write.csv(hh_covariates, "hh_buffer_covariate_dat.csv")
+  
+```  
+  
+# STEP 17: ADD HOUSEHOLD MAHFP OUTPUT
+
+```{r STEP 17}
+  
+  #Get datasets with information for MAHFP variable
+  Food_secure_2011 <- read.csv("sect7_hh_w1.csv")
+  Food_secure_2015 <- read.csv("sect7_hh_w3.csv")
+  
+  #select questions used for MAHFP - hh_s7q07 data columns align with each month of the year and then have a not enough food (1) or enough food (0) for if food secure in that month
+  Food_secure_2011 <- subset(Food_secure_2011, select = c("household_id", "ea_id", "hh_s7q07_m", "hh_s7q07_a", "hh_s7q07_b", "hh_s7q07_c", "hh_s7q07_d", "hh_s7q07_e", "hh_s7q07_f", "hh_s7q07_g", "hh_s7q07_h", "hh_s7q07_i", "hh_s7q07_j", "hh_s7q07_k"))
+  Food_secure_2015 <- subset(Food_secure_2015, select = c("household_id", "ea_id", "hh_s7q07_a", "hh_s7q07_b", "hh_s7q07_c", "hh_s7q07_d", "hh_s7q07_e", "hh_s7q07_f", "hh_s7q07_g", "hh_s7q07_h", "hh_s7q07_i", "hh_s7q07_j", "hh_s7q07_k", "hh_s7q07_l"))
+  
+  #join MAHFP datasets together and join to coordinates
+  all_ea <- full_join(Food_secure_2011, Food_secure_2015, by = "household_id")
+  
+  #remove nas to remove households which were not surveyed in both years
+  all_ea_noNA <- na.omit(all_ea)
+  
+  #calculate MAHFP variables for 2011 and 2015 - sum columns of months as number of 1s is number of months without enough food
+  all_ea_noNA$sum_mins_2011 <- rowSums(all_ea_noNA[, c("hh_s7q07_m", "hh_s7q07_a.x", "hh_s7q07_b.x", "hh_s7q07_c.x", "hh_s7q07_d.x", "hh_s7q07_e.x", "hh_s7q07_f.x", "hh_s7q07_g.x", "hh_s7q07_h.x", "hh_s7q07_i.x", "hh_s7q07_j.x", "hh_s7q07_k.x")]=="X")
+  all_ea_noNA$sum_mins_2015 <- rowSums(all_ea_noNA[, c("hh_s7q07_a.y", "hh_s7q07_b.y", "hh_s7q07_c.y", "hh_s7q07_d.y", "hh_s7q07_e.y", "hh_s7q07_f.y", "hh_s7q07_g.y", "hh_s7q07_h.y", "hh_s7q07_i.y", "hh_s7q07_j.y", "hh_s7q07_k.y", "hh_s7q07_l" )]=="X")
+  
+  #minus summed months from 12 to get number of months hh was food secure
+  all_ea_noNA$MINS_2011 <- 12-all_ea_noNA $sum_mins_2011 
+  all_ea_noNA$MINS_2015 <- 12-all_ea_noNA $sum_mins_2015
+  
+  #calculate change in MAHFP (+ve value improved, -ve value got worse)
+  all_ea_noNA$MINS_change <- all_ea_noNA$MINS_2015 - all_ea_noNA$MINS_2011 #if more months secure in 2015 then positive value
+  all_ea_noNA2 <- all_ea_noNA[!duplicated(all_ea_noNA), ]
+  
+  #select only relavent rows to save as csv
+  MINS_sums <- subset(all_ea_noNA2, select = c("household_id", "ea_id.x" , "MINS_2011", "MINS_2015", "MINS_change"))
+  #name rows appropriately
+  colnames(MINS_sums) <- c("household_id","ea_id","MINS_2011", "MINS_2015", "MINS_change")
+  #save csv
+  write.csv(MINS_sums, "MINS_sums.csv")
+  
+  MINS_sums$MINS_2011 <- as.factor(MINS_sums$MINS_2011)
+  table(MINS_sums$MINS_2011)
+  
+  MINS_sums$MINS_2015 <- as.factor(MINS_sums$MINS_2015)
+  table(MINS_sums$MINS_2015)
+```
+
+#STEP 18: ADD HOUSEHOLD HDDS OUTPUT
+
+```{r STEP 18}  
+  
+  #bring in HDDS datasets
+  HDDS_2011 <- read.csv("sect5b_hh_w1.csv")
+  HDDS_2015 <- read.csv("sect5b_hh_w3.csv")
+  
+  #select questions used
+  HDDS_2011_subset <- subset(HDDS_2011, select = c("household_id", "hh_s5bq01"))
+  HDDS_2015_subset <- subset(HDDS_2015, select = c("household_id", "hh_s5bq01"))
+  
+  #in questions 1 = yes and 2 = no, so change 2 to 0 so can sum data to get number of yes
+  HDDS_2011_subset$hh_s5bq01[HDDS_2011_subset$hh_s5bq01 == 2] <- 0
+  HDDS_2015_subset$hh_s5bq01[HDDS_2015_subset$hh_s5bq01 == 2] <- 0
+  
+  #get number of yes answers to HDDS questions
+  SUM_HDDS_2011 <- HDDS_2011_subset %>% group_by(household_id) %>% 
+    summarise_at(vars("hh_s5bq01"), sum) 
+  SUM_HDDS_2015 <- HDDS_2015_subset %>% group_by(household_id) %>% 
+    summarise_at(vars("hh_s5bq01"), sum) 
+  
+  #make column names the same for join
+  colnames(SUM_HDDS_2011) <- c("household_id", "HDDS_2011")
+  colnames(SUM_HDDS_2015) <- c("household_id", "HDDS_2015")
+  
+  #join 2011 and 2015 datasets
+  change_HDDS <- full_join(SUM_HDDS_2011, SUM_HDDS_2015, by = "household_id")
+  change_HDDS <- na.omit(change_HDDS)
+  
+  #calculate change in HDDS
+  change_HDDS$HDDS_change <- change_HDDS$HDDS_2015 - change_HDDS$HDDS_2011 #+ve value means improved
+  change_HDDS <- as.data.frame(change_HDDS)
+  
+  #save csv
+  write.csv(change_HDDS, "change_HDDS.csv")
+```
+
+#STEP 19: LOAD HOUSEHOLD ASSET OUTPUT
+
+```{r STEP 19}
+
+  #bring in asset datasets
+  assets_11 <- read.csv("sect10_hh_w1.csv")
+  assets_16 <- read.csv("sect10_hh_w3.csv")
+  
+  #select relevant questions
+  assets_11 <- subset(assets_11, select = c("household_id", "ea_id", "hh_s10q00", "hh_s10q0a", "hh_s10q01"))
+  assets_16 <- subset(assets_16, select = c("household_id", "ea_id", "hh_s10q00", "hh_s10q0a", "hh_s10q01"))
+  
+  #work out percentage of households that have each asset in order to decide which assets to use
+  
+  #2011
+  assets_11$hh_s10q01[assets_11$hh_s10q01 >= 1] <- 1 #only need to know if house has it not how many
+  assets_11$hh_s10q01[assets_11$hh_s10q01 < 1] <- 0
+  percent_11 <- as.data.frame(aggregate(hh_s10q01 ~ hh_s10q00, data = assets_11, function(x) 100*(sum(x)/length(x))))
+  plot(percent_11$hh_s10q01) #see spread
+  
+  #2016
+  assets_16$hh_s10q01[assets_16$hh_s10q01 >= 1] <- 1
+  assets_16$hh_s10q01[assets_16$hh_s10q01 < 1] <- 0
+  percent_16 <- as.data.frame(aggregate(hh_s10q01 ~ hh_s10q00, data = assets_16, function(x) 100*(sum(x)/length(x))))
+  plot(percent_16$hh_s10q01)
+```
+
+# STEP 20: Create SES index for assets
+```{r STEP 20} 
+
+# Step 1: Convert data from long to wide format
+#2011
+assets_11_simple <- subset(assets_11, select = c(household_id, hh_s10q00, hh_s10q01)) #simplify df
+assets_11_wide <- assets_11_simple %>%
+  pivot_wider(names_from = hh_s10q00, values_from = hh_s10q01, values_fill = list(hh_s10q01 = 0)) #change to wide format
+assets_11_wide_clean <- assets_11_wide[complete.cases(assets_11_wide), ] #keep only complete cases
+#2016
+assets_16_simple <- subset(assets_16, select = c(household_id, hh_s10q00, hh_s10q01))
+table(duplicated(assets_16_simple[, c("household_id", "hh_s10q00", "hh_s10q01")]))
+assets_16_simple <- assets_16_simple %>%
+  group_by(household_id, hh_s10q00) %>%
+  summarise(hh_s10q01 = max(hh_s10q01, na.rm = TRUE), .groups = "drop")
+assets_16_wide <- assets_16_simple %>%
+  pivot_wider(names_from = hh_s10q00, values_from = hh_s10q01, values_fill = list(hh_s10q01 = 0))
+assets_16_wide_clean <- assets_16_wide[complete.cases(assets_16_wide), ]
+
+# Step 2: Run PCA (excluding household_id)
+#2011
+pca_result_asset_11 <- prcomp(assets_11_wide_clean[,-1], center = TRUE, scale. = TRUE)
+summary(pca_result_asset_11)
+#2016
+# Apply 2011 PCA rotation to 2016 data (using same mean & SD)
+scaled_16 <- scale(assets_16_wide_clean[, -1], 
+                   center = pca_result_asset_11$center, 
+                   scale = pca_result_asset_11$scale)
+
+# Step 3: Extract SES scores (First Principal Component - PC1)
+#2011
+assets_11_wide_clean$SES_Index <- pca_result_asset_11$x[,1] #extract
+head(assets_11_wide_clean %>% select(household_id, SES_Index)) #view 
+clean_assets_11 <- subset(assets_11_wide_clean, select = c(household_id, SES_Index)) 
+#2016
+SES_2016 <- scaled_16 %*% pca_result_asset_11$rotation[, 1]  # Apply 2011 rotation to 2016
+assets_16_wide_clean$SES_Index <- SES_2016 
+clean_assets_16 <- subset(assets_16_wide_clean, select = c(household_id, SES_Index)) 
+
+#STEP 4: compare to count to check direction
+#2011
+assets_11_wide_clean$tot_no_assets = rowSums(assets_11_wide_clean[, 2:36], na.rm = TRUE)
+plot(assets_11_wide_clean$tot_no_assets, assets_11_wide_clean$SES_Index)
+cor(assets_11_wide_clean$tot_no_assets, assets_11_wide_clean$SES_Index) #-ve simpler to flip
+clean_assets_11$SES_Index <- -clean_assets_11$SES_Index
+#2016
+assets_16_wide_clean$tot_no_assets = rowSums(assets_16_wide_clean[, 2:36], na.rm = TRUE)
+plot(assets_16_wide_clean$tot_no_assets, assets_16_wide_clean$SES_Index)
+cor(assets_16_wide_clean$tot_no_assets, assets_16_wide_clean$SES_Index) #-ve simpler to flip
+clean_assets_16$SES_Index <- -clean_assets_16$SES_Index
+
+# Step 5: Check PCA loadings (importance of each asset)
+#2011
+pca_loadings_11 <- as.data.frame(pca_result_asset_11$rotation[,1])  # PC1 loadings
+colnames(pca_loadings_11) <- c("PC1_Loading")
+pca_loadings_11 <- pca_loadings_11 %>% arrange(desc(abs(PC1_Loading)))  # Sort by importance
+head(pca_loadings_11, 10) # View top 10 most important assets in defining wealth
+#2016
+pca_loadings_16 <- as.data.frame(pca_result_asset_16$rotation[,1])  # PC1 loadings
+colnames(pca_loadings_16) <- c("PC1_Loading")
+pca_loadings_16 <- pca_loadings_16 %>% arrange(desc(abs(PC1_Loading)))  # Sort by importance
+head(pca_loadings_16, 10)
+
+#STEP 6: join 2011 and 2016 SES indexes
+  joined_asset_scores <- full_join(clean_assets_11, clean_assets_16, by = "household_id")
+    #remove hh which  were not surveyed both years
+  clean_join_asset_score <- na.omit(joined_asset_scores) #3697 obs
+  #rename
+  colnames(clean_join_asset_score) <- c("household_id", "SES_Index_2011", "SES_Index_2016")
+  
+#STEP 7: calculate change
+    clean_join_asset_score$asset_change <- clean_join_asset_score$SES_Index_2016 - clean_join_asset_score$SES_Index_2011
+    asset_change <- clean_join_asset_score
+  
+  #save csv
+  write.csv(asset_change, "asset_change.csv")
+
+```
+
+#STEP 21: JOIN HOUSEHOLD COVARIATES AND OUTPUTS
+
+```{r STEP 21}
+  #join hdds with mins
+  food_sec_depriv_MINS_HDDS <- full_join(MINS_sums,change_HDDS, by = "household_id")
+  
+  #join asset with food sec outputs
+  household_data_MINS_HDDS_ASSETS <- full_join (food_sec_depriv_MINS_HDDS, asset_change, by = "household_id")
+  
+  #join  PA info and covariates
+  household_type_covariates <- full_join(hh_points_simple, hh_covariates, by = "household_id")
+  
+  #join with outputs 
+  hh_type_cov_output <- full_join(household_type_covariates, household_data_MINS_HDDS_ASSETS, by = "household_id")
+  
+  #omit rows where there is not output data
+  hh_type_cov_output_clean <- subset(hh_type_cov_output, !is.na(MINS_change) & !is.na(HDDS_change) & !is.na(asset_change))
+  hh_type_cov_output_clean <- subset(hh_type_cov_output_clean, !is.na(type)) #3616 households
+  
+  #save_csv 
+  write.csv(hh_type_cov_output_clean, "hh_type_cov_output_clean.csv")
+  
+  #check overall changes
+  library(Rmisc)
+  mins_change_summary <- summarySE(hh_type_cov_output_clean, measurevar="MINS_change", groupvars=c("type"))
+  #control 0.09, treatment -0.54; start 11.09 and 11.32; end 11.18, 10.78
+  hdds_change_summary <- summarySE(hh_type_cov_output_clean, measurevar="HDDS_2015", groupvars=c("type"))
+  # control 0.44, treatment 0.51, start 6.18 and 6.43, end 6.63, 6.94
+  asset_change_summary <- summarySE(hh_type_cov_output_clean, measurevar="asset_change", groupvars=c("type"))
+  #control 0.37, treatment -0.01, start -0.06, 0.39
+  
+``` 
