@@ -1,3 +1,5 @@
+#analysis code by J. Langley and figure code by S. Jago
+
 # Load libraries
 library(sf)
 library(tidyverse)
@@ -8,9 +10,6 @@ library(DescTools)
 library(ggplot2)
 library(ggpp)
 sf_use_s2(F)
-
-# Set working directory
-setwd("~/Papers/Ethiopia - PA history review/Representativeness/Species_representativeness/New_species_represenativeness_method")
 
 ########################### ---- IUCN RED LIST RANGE DATA ---- ###########################
 # Read in the species data and filter PRESENCE and ORIGIN based on p. 204 of the KBA 
@@ -339,72 +338,6 @@ DunnTest(range_protection_pct ~ taxon,
 # Plant-Mammal        -80.914508 9.1e-09 ***
 
 ################################### ---- FIGURES ---- ####################################
-# Plot the main figure
-ggplot(species_dat) +
-  geom_boxplot(aes(x = range_protection_pct, 
-                   y = factor(taxon, level = c('Plant', 'Bird', 'Mammal', 'Herptile')),
-                   fill = threat_status),
-               outlier.shape = NA) +
-  geom_point(data = subset(species_dat, redlistCategory != "Critically Endangered"),
-             aes(x = range_protection_pct,
-                 y = factor(taxon, level = c('Plant', 'Bird', 'Mammal', 'Herptile')),
-                 shape = threat_status),
-             position = position_jitterdodge(jitter.width = 0.3, seed = 002),
-             alpha = 0.6, size = 1)+
-  geom_point(data = subset(species_dat, redlistCategory == "Critically Endangered"),
-             aes(x = range_protection_pct,
-                 y = factor(taxon, level = c('Plant', 'Bird', 'Mammal', 'Herptile')),
-                 color = "red"),
-             position = position_jitternudge(height = 0.16, y = 0.19, nudge.from = "jittered.y",
-                                             seed = 010),
-             size = 1.25)+
-  scale_shape_manual(values = c(17, 16))+
-  scale_fill_manual(values = c("grey90", "grey50")) +
-  scale_color_manual(values = c("red")) +
-  scale_x_continuous(limits = c(0, 105), expand = c(0, 0.2),breaks = seq(0, 105, by = 10)) +
-  theme_classic(base_size = 9) +
-  labs(x = "Percentage of range protected",
-       y = NULL) +
-  theme(axis.text.y = element_text(colour = c("black")),
-        # axis.line.y = element_blank(),
-        legend.spacing = unit(0.105, "cm"),
-        legend.margin = margin(0,0.15,0.17,0.15, "cm"),
-        legend.position = c(.6089, .378),
-        legend.background = element_rect(fill = NULL, color = "black", linewidth = 0.55))+
-  guides(shape = guide_legend(title = NULL),
-         color = guide_legend(title = NULL),
-         fill = guide_legend(title = NULL)) 
-
-# Create a new dataframe for just CR species - this will be used for the inset figure
-critically_endangered_species <- subset(species_dat, 
-                                        redlistCategory == "Critically Endangered")
-
-# View number of CR species in each taxonomic group
-critically_endangered_species %>% 
-  group_by(taxon) %>% 
-  summarise(n = n())
-
-# Count rows where kingdomName is "PLANTAE" and range_protection_pct is 0
-num_rows_CE <- nrow(subset(critically_endangered_species, kingdomName == "PLANTAE" & range_protection_pct == 0))
-print(num_rows_CE)
-
-# Plot the inset figure
-critically_endangered_species %>% 
-  ggplot(aes(x = national_global_pct, 
-             y = factor(taxon, level = c('Plant', 'Bird', 'Mammal', 'Herptile')),
-             fill = taxon))+
-  labs(x = "Mean global extent in Ethiopia (%)",
-       y = "Critically Endangered species") +
-  geom_bar(stat = "summary", fun = "mean", width = 0.6, show.legend = F)+
-  scale_x_continuous(limits = c(0, 105), expand = c(0, 0)) + 
-  scale_y_discrete(labels = c('Plants\n(n = 31)', 'Birds\n(n = 7)', 'Mammals\n(n = 5)',
-                              'Herptiles\n(n = 2)'))+
-  theme_classic(base_size = 9)+
-  theme(axis.text.y = element_text(colour = c("black")))+
-  theme(plot.background = element_rect(color = "black", fill = NA, linewidth = 1))
-
-############################# SOPHIE FIGURES ##############################################
-
 p1 <- ggplot() +
   geom_boxplot(data = species_dat,
                aes(x = range_protection_pct, 
@@ -476,7 +409,7 @@ p3 <- p1 +
 
 p3
 
-ggsave("ETH_species_representativeness9125.png", plot = p3, width = 9, height = 6, dpi = 300)
+ggsave("ETH_species_representativeness.png", plot = p3, width = 9, height = 6, dpi = 300)
 
 
 
