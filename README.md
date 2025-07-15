@@ -28,3 +28,10 @@ We provide a comprehensive national-scale evaluation of Ethiopia’s progress to
 6. Statistical_matching_and_outputs.RMD - carries out statistical matching for gridcells and households, post-matching checks, statistical analysis on effectiveness outputs, and generates Figure 3B, Figure 3C, Supplmentary Figure S4, Supplementary Figure S5 and Supplmentary Figure S8
 7. Matching_robustness_checks.R - carries out matching robustness checks shown in Supplementary Figure S9. This code was adapted from code used in Devenish et al. (2022)  (Devenish, K., Desbureaux, S., Willcock, S., & Jones, J. P. G. (2022). On track to achieve no net loss of forest at Madagascar’s biggest mine. doi:10.1038/s41893-022-00850-7) the figures used to plot the results from our robustness checks were produced using code developed by Ariel Ortiz-Bobea (Ortiz-Bobea, A., Ault, T. R., Carrillo, C. M., Chambers, R. G. & Lobell, D. B. Anthropogenic climate change has slowed global agricultural productivity growth. doi:10.1038/s41558-021-01000-1.)
 8. Individual_PA_anlaysis.RMD - runs effectiveness analysis for indiviudal protected areas using R package lmw and produces Figure 4
+
+## Data
+
+Most data used in this manuscripts is publicly available or included in the supplementary information file. Here we include any data that we processed.
+
+1. Eth_PAs_sep24.shp - this is the updated shapefile for Ethiopia's protected area network as of September 2024. The Ethiopian Wildlife Conservation Authority are responsible for this data and are working to update the World Database on Protected Areas.
+
