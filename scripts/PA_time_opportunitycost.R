@@ -1,7 +1,6 @@
 # ============================================================
-# Title: Spatial Covariate Extraction and Spearman Correlation Analysis
-# Purpose:
-#   Assess whether newer PAs are established in areas with higher pressures
+# Title: PA establishment opportunity cost over time
+# Purpose: Assess whether newer PAs are established in areas with higher pressures
 # ============================================================
 
 # -----------------------------
@@ -67,4 +66,5 @@ compute_spearman_info <- function(var, data) {
 spearman_results <- lapply(covariates, compute_spearman_info, data = pa_df_thin) %>% bind_rows()
 
 print(spearman_results)
+
 
