@@ -1,0 +1,47 @@
+library(devtools)
+devtools::install_github("carl-mc/sidedata")
+
+# Load packages
+library(sidedata)
+library(raster)
+
+# Download SIDE Data for ethnic Groups in Ethiopia 1992
+side_download(country = "Ethiopia", year = 1992, marker = "ethnic", dest.dir = getwd(), conv.hull = T)
+
+# Load SIDE Data for ethnic groups in Ethiopia 1992
+
+# ... ethnic map
+eth.ethnic <- side_load(country = "Ethiopia", year = 1992, marker = "ethnic", source.dir = getwd())
+plot(eth.ethnic)
+
+
+# ... get the SIDE meta data for these maps
+eth.ethnic.meta.df <- sidemap2data(eth.ethnic)
+head(eth.ethnic.meta.df)
+names(eth.ethnic) <- eth.ethnic.meta.df$groupname
+
+install.packages("RStoolbox")
+library(RStoolbox)
+
+# Perform PCA on the RasterStack
+pca_result <- rasterPCA(eth.ethnic, nSamples = 10000, spca = FALSE)
+
+# Inspect the results
+print(pca_result)
+
+# Get the PCA raster layers
+pca_rasters <- pca_result$map
+
+# Plot the first principal component
+plot(pca_rasters[[1]], main = "First Principal Component")
+# Plot the second principal component
+plot(pca_rasters[[2]], main = "Second Principal Component")
+
+
+# Save the first few principal components as raster files
+writeRaster(pca_rasters[[1]], "Ethnicity_PCA_Component1.tif", overwrite = TRUE)
+writeRaster(pca_rasters[[2]], "Ethnicity_PCA_Component2.tif", overwrite = TRUE)
+
+
+summary(pca_result$model)
+loadings(pca_result$model)
