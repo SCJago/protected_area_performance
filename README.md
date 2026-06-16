@@ -36,4 +36,5 @@ Most data used in this manuscripts is publicly available or included in the supp
 
 1. Eth_PAs_sep24.shp - this is the updated shapefile for Ethiopia's protected area network as of September 2024. The Ethiopian Wildlife Conservation Authority are responsible for this data and are working to update the World Database on Protected Areas
 2. All_1km_grid_ID.shp - this is the shapefile of teh 1x1km grid used allowing joining of output data between GIS and R
+3. Land_cover_covariate_reclassification.xlsx - shows how we reclassified MODIS University of Maryland classification to broader categories
 
